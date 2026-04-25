@@ -69,7 +69,10 @@ struct EpisodeListItem: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Button(action: onPlay) {
+            // Премиум-эпизод без entitlement играть нельзя — тап по строке
+            // открывает деталь (там тизер «Доступно по подписке»),
+            // а не молчаливый no-op в плеере.
+            Button(action: episode.isPlayable ? onPlay : onShowDetail) {
                 EpisodeRow(episode: episode)
             }
             .buttonStyle(.plain)

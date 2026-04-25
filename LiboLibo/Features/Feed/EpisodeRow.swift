@@ -42,8 +42,19 @@ struct EpisodeRow: View {
                 }
 
                 HStack(spacing: 8) {
-                    DownloadButton(episode: episode, style: .icon)
-                        .frame(width: 28, height: 28, alignment: .leading)
+                    if episode.isPlayable {
+                        DownloadButton(episode: episode, style: .icon)
+                            .frame(width: 28, height: 28, alignment: .leading)
+                    } else {
+                        // Премиум-эпизод без entitlement — нет смысла показывать
+                        // облако загрузки. Вместо него — замочек, чтобы строка
+                        // визуально отличалась от обычной.
+                        Image(systemName: "lock.fill")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, height: 28, alignment: .leading)
+                            .accessibilityLabel("Доступно по подписке")
+                    }
 
                     Text(metadataLine)
                         .font(.footnote)
