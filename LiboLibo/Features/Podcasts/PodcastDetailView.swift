@@ -37,9 +37,6 @@ struct PodcastDetailView: View {
                             Text(podcast.name)
                                 .font(.title3)
                                 .fontWeight(.semibold)
-                            Text(podcast.artist)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 0)
                     }
@@ -52,6 +49,7 @@ struct PodcastDetailView: View {
                             systemImage: subscriptions.isSubscribed(podcast) ? "checkmark" : "plus"
                         )
                         .frame(maxWidth: .infinity, minHeight: 44)
+                        .foregroundStyle(tint?.accentForeground ?? .white)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(subscriptions.isSubscribed(podcast) ? .secondary : accent)
@@ -81,7 +79,8 @@ struct PodcastDetailView: View {
                         EpisodeListItem(
                             episode: episode,
                             onPlay: { player.play(episode) },
-                            onShowDetail: { path.append(episode) }
+                            onShowDetail: { path.append(episode) },
+                            showsPodcastName: false
                         )
                         .listRowBackground(Color.clear)
                         .swipeActions(edge: .trailing) {

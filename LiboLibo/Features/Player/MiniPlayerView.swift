@@ -19,12 +19,19 @@ struct MiniPlayerView: View {
                 .frame(width: 36, height: 36)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
 
-                Text(episode.title)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 1) {
+                    MarqueeText(
+                        content: Text(episode.title)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                    )
+                    MarqueeText(
+                        content: Text(episode.podcastName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    )
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 Button {
                     player.skip(by: -10)

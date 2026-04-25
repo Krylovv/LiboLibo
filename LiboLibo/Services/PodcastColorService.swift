@@ -120,6 +120,14 @@ struct TintColor: Sendable, Hashable {
     /// Исходный «живой» цвет — для акцентов: кнопки, активные пилюли, swipe-actions.
     var accent: Color { Color(red: r, green: g, blue: b) }
 
+    /// Контрастный текст для подложки `accent`: на ярких/жёлтых акцентах
+    /// возвращает чёрный, на тёмных — белый. iOS-дефолт для
+    /// `.borderedProminent` иногда ставит белый на светлом — лечим вручную.
+    var accentForeground: Color {
+        let lum = 0.299 * r + 0.587 * g + 0.114 * b
+        return lum > 0.6 ? .black : .white
+    }
+
     /// Верхний цвет фона: пастель, 25% обложки + 75% тёплой бумаги.
     var background: Color {
         mix(toward: 0.96, 0.95, 0.92, ratio: 0.75)

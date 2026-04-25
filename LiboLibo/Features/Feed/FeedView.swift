@@ -66,6 +66,7 @@ struct EpisodeListItem: View {
     let episode: Episode
     let onPlay: () -> Void
     let onShowDetail: () -> Void
+    var showsPodcastName: Bool = true
 
     var body: some View {
         HStack(spacing: 4) {
@@ -73,7 +74,7 @@ struct EpisodeListItem: View {
             // открывает деталь (там тизер «Доступно по подписке»),
             // а не молчаливый no-op в плеере.
             Button(action: episode.isPlayable ? onPlay : onShowDetail) {
-                EpisodeRow(episode: episode)
+                EpisodeRow(episode: episode, showsPodcastName: showsPodcastName)
             }
             .buttonStyle(.plain)
 

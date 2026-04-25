@@ -71,6 +71,7 @@ struct EpisodeDetailView: View {
                 } label: {
                     Label("Слушать", systemImage: "play.fill")
                         .frame(maxWidth: .infinity, minHeight: 44)
+                        .foregroundStyle(tint?.accentForeground ?? .white)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(tint?.accent ?? .accentColor)

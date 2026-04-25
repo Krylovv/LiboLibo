@@ -8,6 +8,7 @@ import SwiftUI
 struct EpisodeRow: View {
     let episode: Episode
     var showsPreview: Bool = true
+    var showsPodcastName: Bool = true
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -23,9 +24,11 @@ struct EpisodeRow: View {
             .clipShape(RoundedRectangle(cornerRadius: 10))
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(episode.podcastName)
-                    .font(.caption)
-                    .foregroundStyle(.liboRed)
+                if showsPodcastName {
+                    Text(episode.podcastName)
+                        .font(.caption)
+                        .foregroundStyle(.liboRed)
+                }
 
                 Text(episode.title)
                     .font(.headline)
