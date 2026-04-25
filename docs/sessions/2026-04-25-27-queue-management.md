@@ -1,4 +1,4 @@
-# 2026-04-25-24: Queue management
+# 2026-04-25-27: Queue management
 
 ## Контекст
 
@@ -31,8 +31,7 @@
 В секции «Далее»:
 
 - Свайп влево → удаление (`.swipeActions(edge: .trailing)` с `role: .destructive`).
-- Перетаскивание (≡) → изменение порядка (`.onMove`).
-- Постоянные drag-handles благодаря `.environment(\.editMode, .constant(.active))` на `List`. Красные кружки удаления НЕ появляются, потому что `.onDelete` не используется — только `.swipeActions`.
+- Перетаскивание за иконку «≡» справа → изменение порядка. Реализовано кастомным `DragGesture` с захардкоженной высотой ряда `rowHeight = 52`: считаем `delta = translation.height / rowHeight`, двигаем элемент в локальной копии (`localAfterItems`), на `.onEnded` сохраняем порядок через `player.setQueueAfter(...)`. Native `.onMove` не используется, чтобы handle был всегда виден без перехода в edit mode.
 
 ### Остальные экраны
 
