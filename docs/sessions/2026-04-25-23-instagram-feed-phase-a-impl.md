@@ -46,7 +46,36 @@ Postgres) показал, что:
 
 Production-путь полностью рабочий.
 
+## Production-прогон (добавлено в конце сессии)
+
+После того как Илья дал доступ к Railway-проекту `welcoming-happiness`:
+
+- Через `railway link --project welcoming-happiness --service LiboLibo` залинковали репо.
+- `railway variables --set META_ACCESS_TOKEN=... --set META_IG_USER_ID=17841414860806820`.
+- `railway add --service cron-refresh-instagram --repo Krasilshchik3000/LiboLibo --variables ...` создал второй cron-сервис рядом с существующим `cron-refresh` (тот тянет Transistor).
+- Илья в UI проставил `Root Directory=api`, `Custom Start Command=npm run refresh:instagram`, `Cron Schedule=*/30 * * * *`.
+- Первый запуск отработал `{ "total": 30, "inserted": 30, "updated": 0, "skipped": 0, "apiEnabled": true }`.
+- Через `railway connect Postgres` подтвердили: 30 строк со `status=PENDING`, типы 14 VIDEO + 15 CAROUSEL + 1 IMAGE, первые три записи — реальные посты Либо/Либо.
+
+**Phase A полностью развёрнута на проде. Cron каждые 30 минут будет тянуть свежие посты.**
+
+## Открытые наблюдения по ходу
+
+- В рабочем дереве остались чужие изменения с design/podcast-header-variants
+  (PodcastHeaderMockupsView) и chore/prisma-6 (bump prisma 5→6, PR #15).
+  Я их не трогал.
+- Между моими коммитами кто-то (вероятно IDE/Xcode) параллельно переключал
+  ветки. Пара коммитов случайно ушла на `design/podcast-header-variants` и
+  `analytics`; пере-cherry-pick'ал на `main`. Чтобы не мешать локальной
+  работе пользователя при production-smoke, создал отдельный worktree
+  `/tmp/libolibo-main`, удалил его в конце.
+
 ## Что НЕ доделано (для следующей сессии)
+
+(Историческое: на момент написания основной части сессии Task 8
+оставался открытым. К концу сессии Task 8 закрыт — см. секцию
+«Production-прогон» выше. Список ниже сохраняю как фактический
+референс по шагам, чтобы воспроизвести в случае пересоздания проекта.)
 
 **Task 8 — Railway-конфигурация.** Сделать может только владелец проекта вручную:
 
