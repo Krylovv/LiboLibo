@@ -98,8 +98,91 @@ Transistor остаётся источником правды, аудио про
 
 Также переименовал лог этой сессии: `2026-04-25-08-step-2-backend-kickoff.md` → `2026-04-25-14-step-2-backend-kickoff.md`. Номер 08 занял Ильин лог 1.5; перенумеровал свой на следующий после его последнего (#13). Ссылка в `docs/specs/step-02-backend.md` обновлена.
 
-## Что дальше
+## Локальная проверка (OrbStack)
 
-1. Каркас `api/` создан в этом репо (Express + Prisma + Docker Compose + сидинг 44 подкастов из `podcasts-feeds.json` + CLI обновления фидов).
-2. Самат заводит Railway-проект, подключает Postgres-плагин, поднимает два сервиса (`api` и `cron-refresh`) — детали в [`api/README.md`](../../api/README.md).
-3. Илья (отдельной сессией) переключает iOS-клиент на наш API за фича-флагом, удаляет `RSSParser.swift`.
+Docker Desktop ставить не стали — поставили **OrbStack** (нативный Swift-app под macOS, drop-in совместимый с `docker`/`docker compose`, в разы быстрее на ноуте). `brew install --cask orbstack` → `docker compose up --build` → API на `localhost:3000`.
+
+Получили `db: true`, отдельной командой засеяли 44 подкаста, прогнали refresh — публичные эпизоды + премиум через Transistor API, `audio_url: null` у премиум-эпизодов как и положено.
+
+## Поправка по ходу: Alpine → Debian-slim в Dockerfile
+
+Первая сборка контейнера с `node:22-alpine` упала: Prisma schema-engine не нашёл совместимую версию OpenSSL (Alpine 3 поставляется с OpenSSL 3, бандл Prisma ждёт 1.1.x). Известная проблема. Перешёл на `node:22-slim` (Debian) с явным `apt-get install openssl ca-certificates` — Prisma поднимается из коробки.
+
+## Поправка по ходу: имя переменной в `transistor.env`
+
+Файл `api/transistor.env` Самат создал, но содержимое имело вид `transistor-api-key=...` — POSIX-shell и docker `env_file` такое имя игнорируют (нужен `[A-Z_][A-Z0-9_]*`). Чинил через `sed -i 's/^transistor-api-key=/TRANSISTOR_API_KEY=/'` без чтения значения, плюс добавил trailing newline. Содержимое в сессии не светил.
+
+## Развёртывание на Railway: всё через CLI + GraphQL, без дашборда
+
+Самат авторизовался через `railway login` (browser session token) и положил рядом Project-scoped Personal Token (`railway-personal-token.env`) — он попадает под правило `*.env` в gitignore, ни в одном коммите не появится.
+
+Через CLI и GraphQL сделал:
+
+1. `railway add --database postgres` → плагин Postgres в проекте.
+2. `serviceInstanceUpdate` через GraphQL: `rootDirectory: api`, `dockerfilePath: Dockerfile`, `startCommand: npx tsx src/server.ts`, `preDeployCommand: ["npx prisma db push --skip-generate"]`, `healthcheckPath: /v1/health`. Без этого Railway по умолчанию использует Railpack, который игнорирует наш Dockerfile.
+3. `railway variable set --stdin TRANSISTOR_API_KEY` (значение перекидывал через stdin из локального файла, в логи не уезжает).
+4. `railway variable set DATABASE_URL='${{Postgres.DATABASE_URL}}'` — reference на сервис плагина.
+5. `railway domain --port 3000` — сгенерировался `https://libolibo-production.up.railway.app`.
+
+Деплой собрался, healthcheck прошёл. На этой версии Dockerfile.CMD `npx tsx src/server.ts` запускает сервер в TypeScript напрямую через tsx — TS не компилируется в JS, всё держится на runtime-парсе. На Railway dev-зависимости (включая tsx) ставятся, потому что `npm ci` без `NODE_ENV=production` тянет всё.
+
+Параллельно сделал тонкий cleanup-коммит: `tsconfig.json` → `rootDir: src`, `include: ["src/**/*"]`. Это не влияет на текущий Railway-флоу (он не запускает `npm run build`), но если в будущем кто-то запустит `npm run build`, JS попадёт в `dist/server.js` (не в `dist/src/server.js`).
+
+## Сидинг и refresh на проде
+
+Postgres у Railway доступен внутри контейнеров по `postgres.railway.internal:5432`, с локалки эта адресация не работает. У плагина есть `DATABASE_PUBLIC_URL` (TCP-proxy наружу) — взял его без эха через `railway variable list --service Postgres --kv | grep | cut`, подставил как `DATABASE_URL` локальному `npm run seed` и `npm run refresh`. БД на проде наполнилась 44 подкастами и 2420 эпизодами.
+
+## cron-refresh — отдельный сервис из того же репо
+
+Создал через `serviceCreate` GraphQL, тот же `repo: Krasilshchik3000/LiboLibo`, `branch: main`. Сконфигурировал:
+
+- `rootDirectory: api`, `dockerfilePath: Dockerfile`
+- `startCommand: npm run refresh` (= `tsx src/transistor/refresh-cli.ts`)
+- `cronSchedule: */15 * * * *`
+- `restartPolicyType: NEVER` (после завершения cron-задачи контейнер не перезапускается)
+- те же `DATABASE_URL` (reference на Postgres) и `TRANSISTOR_API_KEY`
+
+Первый деплой запустил через `serviceInstanceDeployV2` (CLI команда `redeploy` для нового сервиса не работает — нужен хотя бы один прошлый деплой). Затем форсировал немедленный run через `deploymentInstanceExecutionCreate(serviceInstanceId)` — прошёл успешно: `total: 44, ok: 1, notModified: 43, errors: 0, apiEnabled: true`. Дальше cron сам триггерит каждые 15 минут.
+
+## Поправка по ходу: ревизия API-контракта от Ильи (commit `c1eea22`)
+
+Параллельно Илья прошёлся по `openapi.yaml` против фактических iOS-моделей и нашёл расхождения по nullability:
+
+- `Podcast.artist` был `nullable: true` в OpenAPI, но `String` (non-optional) в Swift. Добавил в `required`, описал контракт «бэкенд гарантирует строку, если в RSS пусто — `""`».
+- `Episode.summary` — то же самое.
+- `Episode.required` дополнен `podcast_name` и `summary` — формально отсутствовали в required.
+- `Episode.audio_url` остался nullable (премиум без entitlement) — на iOS-стороне `audioUrl: URL?` + UI-тизер.
+
+Также в спеке шага 2 явно зафиксировано, что после переключения iOS на API из клиента уйдут `RSSParser` и `PodcastsRepository.fetchFeed`, описание подкаста будет браться только из `/v1/podcasts/:id`. Подписки/история/поиск на 2.0 остаются клиентскими.
+
+Подробно — в его сессии 15 [`docs/sessions/2026-04-25-15-api-spec-review.md`](2026-04-25-15-api-spec-review.md).
+
+В ответ адаптировал `api/src/lib/serialize.ts`:
+- `PodcastDTO.artist: string | null → string`, при сериализации `p.artist ?? ""`.
+- `EpisodeDTO.summary: string | null → string`, при сериализации `e.summary ?? ""`.
+
+Прод задеплоился автоматически после push. Проверил: на 44 подкастах и 200 эпизодах все `artist` и `summary` имеют тип `string`, ни одного `null`.
+
+## Конфликт нумерации логов
+
+Мой лог `2026-04-25-14-step-2-backend-kickoff.md` (этот файл) и Ильин `2026-04-25-14-step-1.11.md` оба используют номер #14. Ильин #15 ссылается на мой #14 как на «kickoff бэкенда». Решили оставить как есть: имена файлов уникальны, ссылки рабочие, перенумеровка ломала бы существующие ссылки в спеке и в его логе. На будущее — координируем номер заранее, либо договариваемся, что бэкенд и iOS используют разные диапазоны.
+
+## Финальное состояние прода
+
+| Что | Значение |
+|---|---|
+| Public domain | `https://libolibo-production.up.railway.app` |
+| `LiboLibo` (web) | `Status: SUCCESS`, healthcheck `/v1/health` 200 |
+| `cron-refresh` | `Status: SUCCESS`, расписание `*/15 * * * *`, `apiEnabled: true` |
+| Postgres plugin | подключён через reference-переменную |
+| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` на обоих сервисах |
+| `TRANSISTOR_API_KEY` | стоит на обоих сервисах, в репо никогда не попадает |
+| Каталог | 44 подкаста, 7 с `has_premium: true` |
+| Эпизоды | 2420+ публичных, 22+ премиум-тизеров |
+| Контракт типов | `artist` и `summary` всегда строки (никогда `null`) |
+
+Шаг 2.0 закрыт. Дальше — переключение iOS на API (отдельная сессия Ильи) и подфазы 2.1+ (Sign in with Apple, синк подписок, push, IAP).
+
+## Урок про polling Railway-деплоев
+
+В нескольких местах писал многословные циклы вида `until s=$(railway service status ...); ... do echo "$(date) $s"; sleep 10; done` — печатают по строке каждые 10с, шумно. Заменил на тихий `until ...; do sleep 4; done` без эха тела. Деплои на Railway идут 10-30 секунд, постоянное логирование тиков избыточно.
