@@ -7,6 +7,8 @@ import { devicesRouter } from "./routes/devices.js";
 import { meRouter } from "./routes/me.js";
 import { legalRouter } from "./routes/legal.js";
 import { mediaRouter } from "./routes/media.js";
+import { feedInstagramRouter } from "./routes/feed-instagram.js";
+import { adminRouter } from "./admin/router.js";
 
 export function createApp() {
   const app = express();
@@ -31,6 +33,11 @@ export function createApp() {
   app.use("/v1", episodesRouter);
   app.use("/v1", devicesRouter);
   app.use("/v1", meRouter);
+  app.use("/v1", feedInstagramRouter);
+
+  // Web-админка модерации Instagram-ленты (Phase 3.C). HTTP Basic Auth,
+  // server-rendered EJS. Креды в env: ADMIN_USER, ADMIN_PASSWORD.
+  app.use("/admin", adminRouter);
 
   // Раздача Instagram-медиа (Phase 3.B). Файлы лежат на Railway volume.
   app.use("/media", mediaRouter);
