@@ -13,10 +13,6 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		C49B7815EC13F05F2FEBA9E5 /* LiboLibo */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			explicitFileTypes = {
-			};
-			explicitFolders = (
-			);
 			path = LiboLibo;
 			sourceTree = "<group>";
 		};
