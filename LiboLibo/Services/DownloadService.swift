@@ -57,15 +57,20 @@ final class DownloadService {
 
     /// Локальный URL для воспроизведения с диска. Используется PlayerService.
     nonisolated static func localUrl(for episode: Episode) -> URL? {
+        // Расширение берём из audioUrl эпизода, если он есть; иначе пробуем
+        // mp3 как наиболее частый формат подкаст-фидов.
+        let ext = episode.audioUrl.map(extensionFor) ?? "mp3"
         let url = downloadsDirectory()
             .appendingPathComponent(fileKey(episode.id))
-            .appendingPathExtension(extensionFor(episode))
+            .appendingPathExtension(ext)
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
     func download(_ episode: Episode) {
         guard statuses[episode.id] != .downloading,
               statuses[episode.id] != .downloaded else { return }
+        // Премиум без entitlement — нечего скачивать.
+        guard episode.audioUrl != nil else { return }
         statuses[episode.id] = .downloading
         Task { [weak self] in
             await self?.performDownload(episode)
@@ -73,9 +78,13 @@ final class DownloadService {
     }
 
     func deleteDownload(_ episode: Episode) {
+        // Берём расширение из сохранённого Item (если есть) либо из текущего audioUrl.
+        let savedItem = items.first { $0.id == episode.id }
+        let urlForExt: URL? = savedItem?.audioUrl ?? episode.audioUrl
+        let ext = urlForExt.map(Self.extensionFor) ?? "mp3"
         let url = Self.downloadsDirectory()
             .appendingPathComponent(Self.fileKey(episode.id))
-            .appendingPathExtension(Self.extensionFor(episode))
+            .appendingPathExtension(ext)
         try? FileManager.default.removeItem(at: url)
         statuses[episode.id] = .notDownloaded
         items.removeAll { $0.id == episode.id }
@@ -93,12 +102,16 @@ final class DownloadService {
     // MARK: - Internals
 
     private func performDownload(_ episode: Episode) async {
+        guard let remoteUrl = episode.audioUrl else {
+            statuses[episode.id] = .notDownloaded
+            return
+        }
         let dir = Self.downloadsDirectory()
         let dest = dir.appendingPathComponent(Self.fileKey(episode.id))
-            .appendingPathExtension(Self.extensionFor(episode))
+            .appendingPathExtension(Self.extensionFor(remoteUrl))
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            let (tempURL, _) = try await URLSession.shared.download(from: episode.audioUrl)
+            let (tempURL, _) = try await URLSession.shared.download(from: remoteUrl)
             try? FileManager.default.removeItem(at: dest)
             try FileManager.default.moveItem(at: tempURL, to: dest)
             statuses[episode.id] = .downloaded
@@ -109,7 +122,7 @@ final class DownloadService {
                 podcastId: episode.podcastId,
                 podcastName: episode.podcastName,
                 podcastArtworkUrl: episode.podcastArtworkUrl,
-                audioUrl: episode.audioUrl,
+                audioUrl: remoteUrl,
                 pubDate: episode.pubDate,
                 duration: episode.duration,
                 summary: episode.summary,
@@ -144,7 +157,7 @@ final class DownloadService {
         for item in items {
             let url = Self.downloadsDirectory()
                 .appendingPathComponent(Self.fileKey(item.id))
-                .appendingPathExtension(Self.extensionFor(item.asEpisode))
+                .appendingPathExtension(Self.extensionFor(item.audioUrl))
             if FileManager.default.fileExists(atPath: url.path) {
                 newStatuses[item.id] = .downloaded
                 prunedItems.append(item)
@@ -169,8 +182,8 @@ final class DownloadService {
         return String(hex.prefix(40))
     }
 
-    nonisolated private static func extensionFor(_ episode: Episode) -> String {
-        let ext = episode.audioUrl.pathExtension
+    nonisolated private static func extensionFor(_ url: URL) -> String {
+        let ext = url.pathExtension
         return ext.isEmpty ? "mp3" : ext
     }
 }

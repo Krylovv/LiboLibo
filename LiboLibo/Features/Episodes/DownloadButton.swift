@@ -13,18 +13,23 @@ struct DownloadButton: View {
     @Environment(DownloadService.self) private var downloads
 
     var body: some View {
-        let status = downloads.status(for: episode)
+        // Премиум-эпизод без entitlement не имеет audioUrl — скачивать нечего.
+        if !episode.isPlayable {
+            EmptyView()
+        } else {
+            let status = downloads.status(for: episode)
 
-        Button {
-            downloads.toggle(episode)
-        } label: {
-            switch style {
-            case .icon: iconLabel(status)
-            case .button: buttonLabel(status)
+            Button {
+                downloads.toggle(episode)
+            } label: {
+                switch style {
+                case .icon: iconLabel(status)
+                case .button: buttonLabel(status)
+                }
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(accessibility(for: status))
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(accessibility(for: status))
     }
 
     @ViewBuilder

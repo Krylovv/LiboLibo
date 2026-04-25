@@ -1,8 +1,11 @@
 import Foundation
 import Observation
 
-/// Источник правды для списка подкастов и их выпусков.
-/// На фазе 1.1: подкасты — из бандла (podcasts.json), выпуски — по RSS, всё in-memory.
+/// Источник правды для списка подкастов и глобальной ленты выпусков.
+///
+/// На фазе 2.0 данные приходят с бэкенда «Либо-Либо» (см. `APIClient`).
+/// Бандл `podcasts.json` остаётся как фолбэк на первый запуск без сети, чтобы
+/// тинт-обложек и каталог подкастов хоть как-то отрисовались до первого ответа API.
 @MainActor
 @Observable
 final class PodcastsRepository {
@@ -11,8 +14,25 @@ final class PodcastsRepository {
     private(set) var isLoading = false
     private(set) var loadError: String?
 
-    init() {
+    private let api: APIClient
+
+    init(api: APIClient = .shared) {
+        self.api = api
         loadBundledPodcasts()
+        Task { await self.refreshPodcasts() }
+    }
+
+    // MARK: - Подкасты
+
+    /// Подгружает каталог подкастов из API. На ошибке ничего не делает —
+    /// в `podcasts` остаётся то, что загрузилось из бандла на старте.
+    func refreshPodcasts() async {
+        do {
+            let fetched = try await api.fetchPodcasts()
+            if !fetched.isEmpty { podcasts = fetched }
+        } catch {
+            // Тихо. Бандл уже подсунут.
+        }
     }
 
     private func loadBundledPodcasts() {
@@ -31,43 +51,21 @@ final class PodcastsRepository {
         }
     }
 
-    /// Загружает RSS всех подкастов параллельно и обновляет `allEpisodes`.
+    // MARK: - Глобальная лента эпизодов
+
+    /// Загружает первую страницу глобальной ленты эпизодов (свежие сверху).
+    /// На фазе 2.0 — без бесконечной пагинации: 200 свежих эпизодов хватает
+    /// для Фида и «Свежее у подписок». Подгрузка по курсору — отдельной задачей.
     func loadAllEpisodes() async {
         isLoading = true
         defer { isLoading = false }
-
-        let snapshot = podcasts
-        let collected = await Self.fetchAll(podcasts: snapshot)
-        allEpisodes = collected.sorted { $0.pubDate > $1.pubDate }
-    }
-
-    /// Подгружает RSS подкаста: channel description + список выпусков.
-    nonisolated static func fetchFeed(for podcast: Podcast) async -> (channel: PodcastChannelInfo, episodes: [Episode])? {
         do {
-            let (data, _) = try await URLSession.shared.data(from: podcast.feedUrl)
-            return RSSParser.parse(data: data, podcast: podcast)
+            let result = try await api.fetchFeed(limit: 200)
+            allEpisodes = result.episodes
+            loadError = nil
         } catch {
-            return nil
+            loadError = "Не удалось загрузить выпуски."
         }
-    }
-
-    nonisolated private static func fetchAll(podcasts: [Podcast]) async -> [Episode] {
-        await withTaskGroup(of: [Episode].self) { group in
-            for podcast in podcasts {
-                group.addTask {
-                    await fetchEpisodesOnly(podcast: podcast)
-                }
-            }
-            var all: [Episode] = []
-            for await items in group {
-                all.append(contentsOf: items)
-            }
-            return all
-        }
-    }
-
-    nonisolated private static func fetchEpisodesOnly(podcast: Podcast) async -> [Episode] {
-        await fetchFeed(for: podcast)?.episodes ?? []
     }
 }
 

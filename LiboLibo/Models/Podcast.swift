@@ -6,15 +6,10 @@ struct Podcast: Identifiable, Hashable, Codable, Sendable {
     let artist: String
     let feedUrl: URL
     let artworkUrl: URL?
-    /// Канальное описание из RSS (обогащается скриптом scripts/refresh-podcast-metadata.py).
+    /// Канальное описание. На фазе 2.0 приходит из бэкенда (поле `description`
+    /// в `/v1/podcasts`); до подключения API — из бандла.
     let description: String?
     /// Дата самого свежего выпуска. По ней приложение делит подкасты на
     /// «выходят сейчас / недавно / давно не выходят».
     let lastEpisodeDate: Date?
-}
-
-/// Подробности, вытащенные из самого RSS-канала. Используется PodcastDetailView
-/// для отрисовки полного описания, когда оно нужно «свежее».
-struct PodcastChannelInfo: Sendable {
-    let description: String
 }

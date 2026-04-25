@@ -81,10 +81,14 @@ final class PlayerService {
             resume()
             return
         }
+        // Премиум-эпизод без активного entitlement: бэкенд отдал `audio_url: null`,
+        // играть нечего. Тихо выходим — UI должен сам блокировать «Слушать».
+        guard let remoteUrl = episode.audioUrl else { return }
+
         currentEpisode = episode
         currentTime = 0
         duration = 0
-        let url = localUrlResolver?(episode) ?? episode.audioUrl
+        let url = localUrlResolver?(episode) ?? remoteUrl
         let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
         player.play()
