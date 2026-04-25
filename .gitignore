@@ -85,3 +85,8 @@ id_rsa.*
 # Облачные CLI
 .aws/
 .gcloud/
+
+# Local secrets (never commit)
+ig-token.txt
+*.env
+!*.env.example
