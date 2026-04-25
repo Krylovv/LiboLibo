@@ -1,9 +1,8 @@
 import SwiftUI
 
 /// Now-playing screen в духе Apple Podcasts: компактная обложка, две строки
-/// заголовка, прогресс-слайдер, крупные контролы, нижний ряд утилит.
-/// Все размеры зафиксированы — чтобы обложка не разбухала и текст не убегал
-/// за поля.
+/// заголовка, тонкий прогресс-слайдер с временем, крупные контролы, регулятор
+/// громкости, нижний ряд утилит.
 struct PlayerView: View {
     @Environment(PlayerService.self) private var player
     @Environment(\.dismiss) private var dismiss
@@ -19,21 +18,26 @@ struct PlayerView: View {
 
                     Artwork(url: episode.podcastArtworkUrl)
 
-                    Spacer().frame(height: 28)
+                    Spacer().frame(height: 24)
 
                     Titles(episode: episode)
                         .padding(.horizontal, 24)
 
                     Spacer().frame(height: 22)
 
-                    ProgressSlider()
-                        .padding(.horizontal, 32)
+                    ProgressBar()
+                        .padding(.horizontal, 24)
 
-                    Spacer().frame(height: 16)
+                    Spacer().frame(height: 18)
 
                     BigControls()
 
-                    Spacer().frame(height: 20)
+                    Spacer().frame(height: 18)
+
+                    VolumeRow()
+                        .padding(.horizontal, 24)
+
+                    Spacer().frame(height: 18)
 
                     UtilityRow(episode: episode) {
                         showsNotes = true
@@ -77,16 +81,15 @@ private struct Titles: View {
     let episode: Episode
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 4) {
             Text(episode.podcastName)
                 .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.8))
+                .foregroundStyle(.white.opacity(0.75))
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
 
             Text(episode.title)
-                .font(.title3)
-                .fontWeight(.semibold)
+                .font(.headline)
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -95,11 +98,72 @@ private struct Titles: View {
     }
 }
 
+/// Apple-Podcasts-style тонкий прогресс. Без видимого thumb-а в idle, лёгкий
+/// наплыв при скрабинге.
+private struct ProgressBar: View {
+    @Environment(PlayerService.self) private var player
+    @State private var draggedFraction: Double?
+    @State private var isDragging = false
+
+    var body: some View {
+        VStack(spacing: 6) {
+            GeometryReader { geo in
+                let width = geo.size.width
+                let progress = max(0, min(1, currentFraction))
+                let trackHeight: CGFloat = isDragging ? 6 : 3
+
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.25))
+                        .frame(height: trackHeight)
+                    Capsule()
+                        .fill(Color.white)
+                        .frame(width: width * progress, height: trackHeight)
+                }
+                .frame(maxHeight: .infinity, alignment: .center)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            isDragging = true
+                            let f = max(0, min(1, value.location.x / width))
+                            draggedFraction = f
+                        }
+                        .onEnded { value in
+                            let f = max(0, min(1, value.location.x / width))
+                            if player.duration > 0 {
+                                player.seek(to: f * player.duration)
+                            }
+                            draggedFraction = nil
+                            isDragging = false
+                        }
+                )
+                .animation(.easeInOut(duration: 0.15), value: isDragging)
+            }
+            .frame(height: 18)
+
+            HStack {
+                Text(PlayerService.formatTime(player.currentTime))
+                Spacer()
+                Text("−" + PlayerService.formatTime(max(0, player.duration - player.currentTime)))
+            }
+            .font(.caption)
+            .monospacedDigit()
+            .foregroundStyle(.white.opacity(0.85))
+        }
+    }
+
+    private var currentFraction: Double {
+        if let dv = draggedFraction { return dv }
+        return player.duration > 0 ? player.currentTime / player.duration : 0
+    }
+}
+
 private struct BigControls: View {
     @Environment(PlayerService.self) private var player
 
     var body: some View {
-        HStack(spacing: 40) {
+        HStack(spacing: 56) {
             ControlButton(systemImage: "gobackward.10", size: 30) { player.skip(by: -10) }
 
             Button {
@@ -112,6 +176,21 @@ private struct BigControls: View {
             .buttonStyle(.plain)
 
             ControlButton(systemImage: "goforward.10", size: 30) { player.skip(by: 10) }
+        }
+    }
+}
+
+private struct VolumeRow: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "speaker.fill")
+                .font(.footnote)
+                .foregroundStyle(.white.opacity(0.7))
+            SystemVolumeSlider()
+                .frame(height: 28)
+            Image(systemName: "speaker.wave.3.fill")
+                .font(.footnote)
+                .foregroundStyle(.white.opacity(0.7))
         }
     }
 }
@@ -253,89 +332,5 @@ private struct PillButton: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-    }
-}
-
-private struct ProgressSlider: View {
-    @Environment(PlayerService.self) private var player
-    @State private var draggedFraction: Double?
-
-    var body: some View {
-        VStack(spacing: 6) {
-            CustomProgressBar(
-                fraction: bindingFraction,
-                onDragEnd: handleDragEnd
-            )
-            .frame(height: 12)
-
-            HStack {
-                Text(PlayerService.formatTime(player.currentTime))
-                Spacer()
-                Text(PlayerService.formatTime(max(0, player.duration - player.currentTime)))
-            }
-            .font(.caption)
-            .monospacedDigit()
-            .foregroundStyle(.white.opacity(0.85))
-        }
-    }
-
-    private var bindingFraction: Binding<Double> {
-        Binding(
-            get: {
-                if let dv = draggedFraction { return dv }
-                return player.duration > 0 ? player.currentTime / player.duration : 0
-            },
-            set: { draggedFraction = $0 }
-        )
-    }
-
-    private func handleDragEnd(_ fraction: Double) {
-        if player.duration > 0 {
-            player.seek(to: fraction * player.duration)
-        }
-        draggedFraction = nil
-    }
-}
-
-/// Кастомный прогресс-бар: серый трек + красный заполненный участок + белый thumb.
-/// Системный Slider на blurred backdrop часто почти невидим.
-private struct CustomProgressBar: View {
-    @Binding var fraction: Double
-    let onDragEnd: (Double) -> Void
-
-    var body: some View {
-        GeometryReader { geo in
-            let width = geo.size.width
-            let progress = max(0, min(1, fraction))
-            let trackHeight: CGFloat = 4
-            let thumbSize: CGFloat = 12
-
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Color.white.opacity(0.25))
-                    .frame(height: trackHeight)
-                Capsule()
-                    .fill(Color.liboRed)
-                    .frame(width: width * progress, height: trackHeight)
-                Circle()
-                    .fill(Color.white)
-                    .frame(width: thumbSize, height: thumbSize)
-                    .offset(x: width * progress - thumbSize / 2)
-                    .shadow(color: .black.opacity(0.3), radius: 2, y: 1)
-            }
-            .frame(maxHeight: .infinity, alignment: .center)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        let f = max(0, min(1, value.location.x / width))
-                        fraction = f
-                    }
-                    .onEnded { value in
-                        let f = max(0, min(1, value.location.x / width))
-                        onDragEnd(f)
-                    }
-            )
-        }
     }
 }

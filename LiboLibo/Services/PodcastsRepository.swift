@@ -22,7 +22,9 @@ final class PodcastsRepository {
         }
         do {
             let data = try Data(contentsOf: url)
-            let payload = try JSONDecoder().decode(BundledPodcasts.self, from: data)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let payload = try decoder.decode(BundledPodcasts.self, from: data)
             podcasts = payload.podcasts
         } catch {
             loadError = "не удалось распарсить podcasts.json: \(error.localizedDescription)"
