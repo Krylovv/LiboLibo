@@ -6,6 +6,7 @@ import { episodesRouter } from "./routes/episodes.js";
 import { devicesRouter } from "./routes/devices.js";
 import { meRouter } from "./routes/me.js";
 import { legalRouter } from "./routes/legal.js";
+import { mediaRouter } from "./routes/media.js";
 import { feedInstagramRouter } from "./routes/feed-instagram.js";
 import { adminRouter } from "./admin/router.js";
 
@@ -37,6 +38,9 @@ export function createApp() {
   // Web-админка модерации Instagram-ленты (Phase 3.C). HTTP Basic Auth,
   // server-rendered EJS. Креды в env: ADMIN_USER, ADMIN_PASSWORD.
   app.use("/admin", adminRouter);
+
+  // Раздача Instagram-медиа (Phase 3.B). Файлы лежат на Railway volume.
+  app.use("/media", mediaRouter);
 
   // Legal pages — served at the root, не под /v1, чтобы URL были короткие
   // и удобные для App Store / In-App-листинга.
