@@ -8,6 +8,11 @@ struct ProfileView: View {
     @Environment(PlayerService.self) private var player
     @Environment(AdaptyService.self) private var adapty
 
+    /// Колбэк от RootView для переключения на таб «Подкасты» из CTA в пустом
+    /// состоянии «Подписок». В Preview по умолчанию nil — кнопка просто
+    /// не показывается.
+    var onOpenPodcasts: (() -> Void)? = nil
+
     @State private var path = NavigationPath()
     @State private var showsClearHistoryAlert = false
     @State private var showsPaywall = false
@@ -162,9 +167,28 @@ struct ProfileView: View {
     private var subscriptionsSection: some View {
         Section("Подписки") {
             if subscribedPodcasts.isEmpty {
-                Text("Открой «Подкасты» и подпишись на любой — он появится здесь.")
-                    .foregroundStyle(.secondary)
-                    .font(.callout)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Подпишись на подкаст — он появится здесь, и его выпуски будут в «Свежее у подписок».")
+                        .foregroundStyle(.secondary)
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let onOpenPodcasts {
+                        Button(action: onOpenPodcasts) {
+                            Text("Открыть подкасты")
+                                .font(.body.weight(.semibold))
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .foregroundStyle(.white)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(Color.liboRed)
+                                )
+                                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 4)
             } else {
                 ForEach(subscribedPodcasts) { podcast in
                     NavigationLink(value: podcast) {

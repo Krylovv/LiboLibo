@@ -79,12 +79,24 @@ struct EpisodeListItem: View {
                 }
                 .frame(width: 80, height: 80)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(alignment: .bottomTrailing) {
+                    // Подсветка инвертированного паттерна «тап по строке = играть».
+                    // Премиум-эпизод не играется — overlay не показываем.
+                    if episode.isPlayable {
+                        Image(systemName: "play.circle.fill")
+                            .font(.system(size: 28))
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, .black.opacity(0.65))
+                            .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                            .padding(6)
+                    }
+                }
 
                 VStack(alignment: .leading, spacing: 4) {
                     if showsPodcastName {
                         Text(episode.podcastName)
                             .font(.caption)
-                            .foregroundStyle(.liboRed)
+                            .foregroundStyle(.secondary)
                     }
                     Text(episode.title)
                         .font(.headline)
