@@ -27,6 +27,24 @@ export async function refreshAllFeeds(): Promise<RefreshSummary> {
     include: { feedFetch: true },
   });
 
+  // Pull the entire account from Transistor in two paginated calls (one for
+  // shows, one for all episodes) instead of issuing per-podcast requests.
+  // Per-podcast fan-out used to trigger Transistor's HTTP 429 rate limit,
+  // which left transistorShowId unset and premium episodes never syncing.
+  let showIdByFeedUrl: Map<string, string> | null = null;
+  let episodesByShowId: Map<string, api.TransistorEpisode[]> | null = null;
+  if (apiEnabled) {
+    try {
+      showIdByFeedUrl = await api.listAllShowsByFeedUrl();
+      episodesByShowId = await api.listAllEpisodesByShowId();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[transistor-api] account fetch failed: ${msg}`);
+      showIdByFeedUrl = null;
+      episodesByShowId = null;
+    }
+  }
+
   const results: RefreshResult[] = [];
   let i = 0;
 
@@ -35,7 +53,7 @@ export async function refreshAllFeeds(): Promise<RefreshSummary> {
       while (i < podcasts.length) {
         const podcast = podcasts[i++];
         if (!podcast) break;
-        results.push(await refreshOne(podcast, apiEnabled));
+        results.push(await refreshOne(podcast, apiEnabled, showIdByFeedUrl, episodesByShowId));
       }
     }),
   );
@@ -59,6 +77,8 @@ type PodcastWithFetch = Awaited<
 async function refreshOne(
   podcast: PodcastWithFetch,
   apiEnabled: boolean,
+  showIdByFeedUrl: Map<string, string> | null,
+  episodesByShowId: Map<string, api.TransistorEpisode[]> | null,
 ): Promise<RefreshResult> {
   // Step 1: fetch the public RSS. This is the source of truth for which
   // episodes are PUBLIC; everything else (visible only via API) is premium.
@@ -71,11 +91,16 @@ async function refreshOne(
   const publicGuids = new Set(rssResult.feed.episodes.map((e) => e.id));
   let premiumCount = 0;
 
-  // Step 2: if we have a Transistor API key, fetch ALL episodes (including
-  // subscriber-only ones), and mark anything not in publicGuids as premium.
-  if (apiEnabled) {
+  // Step 2: if we have a Transistor API key and the bulk fetch succeeded,
+  // mark anything not in publicGuids as premium.
+  if (apiEnabled && episodesByShowId) {
     try {
-      premiumCount = await syncPremiumViaAPI(podcast, publicGuids);
+      premiumCount = await syncPremiumFromBulk(
+        podcast,
+        publicGuids,
+        showIdByFeedUrl,
+        episodesByShowId,
+      );
     } catch (err) {
       // API failure must not block public episode ingestion — log and continue.
       const msg = err instanceof Error ? err.message : String(err);
@@ -224,24 +249,27 @@ async function fetchPublicRSS(
   }
 }
 
-// Returns the count of premium episodes upserted. Resolves the show id from
-// Transistor (cached on Podcast.transistorShowId), then iterates published
-// API episodes and upserts the ones absent from publicGuids as premium.
-async function syncPremiumViaAPI(
+// Picks the podcast's premium episodes out of the pre-fetched account-wide
+// bulk and upserts them. Resolves show id via the cached value or the bulk
+// shows map (and persists it on first sight so future runs need fewer
+// lookups).
+async function syncPremiumFromBulk(
   podcast: PodcastWithFetch,
   publicGuids: Set<string>,
+  showIdByFeedUrl: Map<string, string> | null,
+  episodesByShowId: Map<string, api.TransistorEpisode[]>,
 ): Promise<number> {
-  let showId = podcast.transistorShowId;
-  if (!showId) {
-    showId = await api.findShowIdByFeedUrl(podcast.feedUrl);
-    if (!showId) return 0; // not in our Transistor account
+  const showId =
+    podcast.transistorShowId ?? showIdByFeedUrl?.get(podcast.feedUrl) ?? null;
+  if (!showId) return 0;
+  if (showId !== podcast.transistorShowId) {
     await prisma.podcast.update({
       where: { id: podcast.id },
       data: { transistorShowId: showId },
     });
   }
 
-  const apiEpisodes = await api.listAllEpisodes(showId);
+  const apiEpisodes = episodesByShowId.get(showId) ?? [];
   const premium: Array<{
     id: string;
     title: string;

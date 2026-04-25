@@ -74,23 +74,39 @@ interface EpisodeAttrs {
   type?: string | null;
 }
 
+// Transistor returns 429 when we burst too many requests at once. Retry with
+// the server-provided Retry-After (seconds), falling back to exponential
+// backoff. Only 429 is retried — other 4xx/5xx fail fast.
 async function getJSON<T>(path: string, query?: Record<string, string>): Promise<T> {
   const url = new URL(BASE + path);
   if (query) for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
 
-  const resp = await fetch(url, { headers: authHeaders() });
-  if (!resp.ok) {
+  const MAX_RETRIES = 5;
+  for (let attempt = 0; ; attempt++) {
+    const resp = await fetch(url, { headers: authHeaders() });
+    if (resp.ok) return (await resp.json()) as T;
+
+    if (resp.status === 429 && attempt < MAX_RETRIES) {
+      const retryAfter = Number(resp.headers.get("retry-after"));
+      const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+        ? retryAfter * 1000
+        : 500 * 2 ** attempt;
+      await new Promise((r) => setTimeout(r, waitMs));
+      continue;
+    }
+
     // Don't include the URL with query — keeps secrets out of logs even if
     // we ever pass auth via query params (we don't, but defense in depth).
     throw new Error(`Transistor API ${path} → HTTP ${resp.status}`);
   }
-  return (await resp.json()) as T;
 }
 
-// Resolve a Transistor show id by its feed URL. Used to bind our podcasts
-// (seeded from podcasts-feeds.json by iTunes id) to Transistor shows.
-export async function findShowIdByFeedUrl(feedUrl: string): Promise<string | null> {
-  // /v1/shows lists shows owned by the API key holder.
+// All shows visible to the current API key, keyed by their `feed_url`.
+// One bulk fetch replaces N per-podcast `findShowIdByFeedUrl` calls — without
+// this, refreshing dozens of podcasts in parallel hammered Transistor and
+// most calls came back as HTTP 429.
+export async function listAllShowsByFeedUrl(): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
   let page = 1;
   for (;;) {
     const list = await getJSON<JsonApiList<ShowAttrs>>("/shows", {
@@ -98,28 +114,33 @@ export async function findShowIdByFeedUrl(feedUrl: string): Promise<string | nul
       "pagination[per]": String(PAGE_SIZE),
     });
     for (const s of list.data) {
-      if (s.attributes.feed_url === feedUrl) return s.id;
+      const url = s.attributes.feed_url;
+      if (url) map.set(url, s.id);
     }
     const total = list.meta?.totalPages ?? 1;
-    if (page >= total) return null;
+    if (page >= total) return map;
     page += 1;
   }
 }
 
-// All episodes for a show, across pagination. Includes drafts and
-// subscriber-only — caller decides what to do with them.
-export async function listAllEpisodes(showId: string): Promise<TransistorEpisode[]> {
-  const out: TransistorEpisode[] = [];
+// All episodes across the account, grouped by show id. Transistor's
+// /v1/episodes accepts no show_id filter and returns every episode for the
+// API key's account in one paginated stream — much cheaper than fetching
+// each show separately. Drafts and subscriber-only are included; caller
+// decides what to do with them.
+export async function listAllEpisodesByShowId(): Promise<Map<string, TransistorEpisode[]>> {
+  const byShow = new Map<string, TransistorEpisode[]>();
   let page = 1;
   for (;;) {
     const list = await getJSON<JsonApiList<EpisodeAttrs>>("/episodes", {
-      "show_id": showId,
       "pagination[page]": String(page),
       "pagination[per]": String(PAGE_SIZE),
     });
     for (const e of list.data) {
+      const showId = e.relationships?.show?.data?.id;
+      if (!showId) continue;
       const a = e.attributes;
-      out.push({
+      const ep: TransistorEpisode = {
         id: e.id,
         showId,
         guid: a.guid ?? null,
@@ -130,11 +151,14 @@ export async function listAllEpisodes(showId: string): Promise<TransistorEpisode
         mediaUrl: a.media_url ?? null,
         status: a.status ?? "unknown",
         type: a.type ?? "full",
-      });
+      };
+      const bucket = byShow.get(showId);
+      if (bucket) bucket.push(ep);
+      else byShow.set(showId, [ep]);
     }
     const total = list.meta?.totalPages ?? 1;
     if (page >= total) break;
     page += 1;
   }
-  return out;
+  return byShow;
 }
