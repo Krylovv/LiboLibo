@@ -196,7 +196,13 @@ struct ProfileView: View {
                 EpisodeListItem(
                     episode: episode,
                     onPlay: { player.play(episode) },
-                    onShowDetail: { path.append(episode) }
+                    onShowDetail: { path.append(episode) },
+                    onPlayNext: { player.playNext(episode) },
+                    onNavigateToPodcast: {
+                        if let podcast = repository.podcasts.first(where: { $0.id == episode.podcastId }) {
+                            path.append(podcast)
+                        }
+                    }
                 )
                 .swipeActions(edge: .trailing) {
                     Button(role: .destructive) {
@@ -220,7 +226,13 @@ struct ProfileView: View {
                             .sorted { $0.pubDate < $1.pubDate }
                         player.play(episode, context: context)
                     },
-                    onShowDetail: { path.append(episode) }
+                    onShowDetail: { path.append(episode) },
+                    onPlayNext: { player.playNext(episode) },
+                    onNavigateToPodcast: {
+                        if let podcast = repository.podcasts.first(where: { $0.id == episode.podcastId }) {
+                            path.append(podcast)
+                        }
+                    }
                 )
             }
         }
@@ -233,7 +245,13 @@ struct ProfileView: View {
                 EpisodeListItem(
                     episode: episode,
                     onPlay: { player.play(episode) },
-                    onShowDetail: { path.append(episode) }
+                    onShowDetail: { path.append(episode) },
+                    onPlayNext: { player.playNext(episode) },
+                    onNavigateToPodcast: {
+                        if let podcast = repository.podcasts.first(where: { $0.id == episode.podcastId }) {
+                            path.append(podcast)
+                        }
+                    }
                 )
             }
         } header: {
