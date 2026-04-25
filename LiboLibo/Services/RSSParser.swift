@@ -1,20 +1,24 @@
 import Foundation
 
 /// Минимальный парсер подкаст-RSS.
-/// Достаёт title / description / pubDate / enclosure URL / itunes:duration / guid из каждого <item>.
+/// Возвращает channel description и список выпусков.
 enum RSSParser {
-    static func parse(data: Data, podcast: Podcast) -> [Episode] {
+    static func parse(data: Data, podcast: Podcast) -> (channel: PodcastChannelInfo, episodes: [Episode]) {
         let delegate = RSSParserDelegate(podcast: podcast)
         let parser = XMLParser(data: data)
         parser.delegate = delegate
         parser.parse()
-        return delegate.episodes
+        return (
+            channel: PodcastChannelInfo(description: delegate.channelDescription),
+            episodes: delegate.episodes
+        )
     }
 }
 
 private final class RSSParserDelegate: NSObject, XMLParserDelegate {
     let podcast: Podcast
     var episodes: [Episode] = []
+    var channelDescription = ""
 
     private var currentElement = ""
     private var currentTitle = ""
@@ -24,6 +28,8 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate {
     private var currentGUID = ""
     private var currentAudioUrl: URL?
     private var inItem = false
+    private var inChannel = false
+    private var channelLevelDescriptionBuffer = ""
 
     init(podcast: Podcast) {
         self.podcast = podcast
@@ -35,6 +41,9 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate {
                 qualifiedName: String?,
                 attributes: [String: String]) {
         currentElement = element
+        if element == "channel" {
+            inChannel = true
+        }
         if element == "item" {
             inItem = true
             currentTitle = ""
@@ -53,18 +62,33 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate {
     }
 
     func parser(_ parser: XMLParser, foundCharacters string: String) {
-        guard inItem else { return }
-        switch currentElement {
-        case "title": currentTitle += string
-        case "description": currentDescription += string
-        case "pubDate": currentPubDate += string
-        case "itunes:duration": currentDuration += string
-        case "guid": currentGUID += string
-        default: break
+        if inItem {
+            switch currentElement {
+            case "title":             currentTitle += string
+            case "description":       currentDescription += string
+            case "itunes:summary":    if currentDescription.isEmpty { currentDescription += string }
+            case "pubDate":           currentPubDate += string
+            case "itunes:duration":   currentDuration += string
+            case "guid":              currentGUID += string
+            default: break
+            }
+            return
+        }
+        if inChannel {
+            // Channel-level description (or itunes:summary) до первого <item>.
+            switch currentElement {
+            case "description", "itunes:summary":
+                channelLevelDescriptionBuffer += string
+            default:
+                break
+            }
         }
     }
 
-    func parser(_ parser: XMLParser, didEndElement element: String, namespaceURI: String?, qualifiedName: String?) {
+    func parser(_ parser: XMLParser,
+                didEndElement element: String,
+                namespaceURI: String?,
+                qualifiedName: String?) {
         if element == "item" {
             defer { inItem = false }
             guard let audio = currentAudioUrl else { return }
@@ -80,11 +104,18 @@ private final class RSSParserDelegate: NSObject, XMLParserDelegate {
                 podcastName: podcast.name,
                 podcastArtworkUrl: podcast.artworkUrl,
                 title: currentTitle.trimmingCharacters(in: .whitespacesAndNewlines),
-                summary: currentDescription.trimmingCharacters(in: .whitespacesAndNewlines),
+                summary: stripHTML(currentDescription).trimmingCharacters(in: .whitespacesAndNewlines),
                 pubDate: date,
                 duration: dur,
                 audioUrl: audio
             ))
+            return
+        }
+
+        if element == "channel" {
+            // Финализируем channel description в момент закрытия канала.
+            channelDescription = stripHTML(channelLevelDescriptionBuffer).trimmingCharacters(in: .whitespacesAndNewlines)
+            inChannel = false
         }
     }
 }
@@ -108,5 +139,63 @@ private func parseDuration(_ string: String) -> TimeInterval? {
     case 2: return parts[0] * 60 + parts[1]
     case 1: return parts[0]
     default: return nil
+    }
+}
+
+/// Грубый, но достаточный для подкаст-RSS strip HTML-тегов и сущностей.
+private func stripHTML(_ string: String) -> String {
+    var result = string
+    // Заменим <br>, <br/>, <p>, </p> на пробелы / переводы строк.
+    result = result.replacingOccurrences(of: "<br[^>]*>", with: "\n", options: .regularExpression)
+    result = result.replacingOccurrences(of: "</p>", with: "\n\n")
+    // Снесём остальные теги.
+    result = result.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+    // Базовые HTML-сущности.
+    let entities: [String: String] = [
+        "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"",
+        "&#39;": "'", "&apos;": "'", "&nbsp;": " ",
+        "&mdash;": "—", "&ndash;": "–", "&hellip;": "…",
+        "&laquo;": "«", "&raquo;": "»",
+    ]
+    for (k, v) in entities {
+        result = result.replacingOccurrences(of: k, with: v)
+    }
+    // Сожмём множественные переводы строк / пробелы.
+    result = result.replacingOccurrences(of: "[\n]{3,}", with: "\n\n", options: .regularExpression)
+    return result
+}
+
+// MARK: - Sentence helpers
+
+extension String {
+    /// Возвращает первое предложение строки. Если в нём меньше 2 слов — берём первые два.
+    func firstSentences(maxCount: Int = 2) -> String {
+        let trimmed = self.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        var sentences: [String] = []
+        var buffer = ""
+        for char in trimmed {
+            buffer.append(char)
+            if ".!?".contains(char) {
+                let s = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !s.isEmpty { sentences.append(s) }
+                buffer = ""
+                if sentences.count >= maxCount { break }
+            }
+        }
+        let leftover = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !leftover.isEmpty && sentences.count < maxCount {
+            sentences.append(leftover)
+        }
+        if sentences.isEmpty { return trimmed }
+
+        // Если первое предложение короче 2 слов — добавляем второе (правило Ильи).
+        let first = sentences[0]
+        let firstWords = first.split { $0.isWhitespace }.count
+        if firstWords < 2, sentences.count >= 2 {
+            return sentences.prefix(2).joined(separator: " ")
+        }
+        return first
     }
 }

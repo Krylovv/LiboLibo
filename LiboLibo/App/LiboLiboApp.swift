@@ -14,9 +14,9 @@ struct LiboLiboApp: App {
                 .environment(subscriptions)
                 .environment(history)
                 .environment(player)
+                .tint(.liboRed)
                 .onAppear {
-                    // Связываем плеер и историю: каждый старт нового эпизода
-                    // записывается в журнал прослушиваний.
+                    // Связываем плеер и историю.
                     player.onPlay = { [weak history] episode in
                         history?.record(episode)
                     }

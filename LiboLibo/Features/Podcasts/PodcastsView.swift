@@ -3,21 +3,14 @@ import SwiftUI
 struct PodcastsView: View {
     @Environment(PodcastsRepository.self) private var repository
 
-    private let columns = [GridItem(.adaptive(minimum: 110), spacing: 12, alignment: .top)]
-
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-                    ForEach(repository.podcasts) { podcast in
-                        NavigationLink(value: podcast) {
-                            PodcastTile(podcast: podcast)
-                        }
-                        .buttonStyle(.plain)
-                    }
+            List(repository.podcasts) { podcast in
+                NavigationLink(value: podcast) {
+                    PodcastRow(podcast: podcast)
                 }
-                .padding()
             }
+            .listStyle(.plain)
             .navigationTitle("Подкасты")
             .navigationDestination(for: Podcast.self) { podcast in
                 PodcastDetailView(podcast: podcast)
@@ -26,11 +19,11 @@ struct PodcastsView: View {
     }
 }
 
-private struct PodcastTile: View {
+private struct PodcastRow: View {
     let podcast: Podcast
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        HStack(alignment: .center, spacing: 12) {
             AsyncImage(url: podcast.artworkUrl) { phase in
                 switch phase {
                 case .success(let image):
@@ -39,15 +32,22 @@ private struct PodcastTile: View {
                     Color.secondary.opacity(0.15)
                 }
             }
-            .aspectRatio(1, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .frame(width: 64, height: 64)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
 
-            Text(podcast.name)
-                .font(.subheadline)
-                .lineLimit(2, reservesSpace: true)
-                .foregroundStyle(.primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(podcast.name)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .lineLimit(2)
+                Text(podcast.artist)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
         }
+        .padding(.vertical, 4)
     }
 }
 

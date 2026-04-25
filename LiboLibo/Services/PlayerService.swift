@@ -26,7 +26,34 @@ final class PlayerService {
     /// Используется HistoryService, чтобы записать факт прослушивания.
     var onPlay: ((Episode) -> Void)?
 
-    static let speedOptions: [Float] = [0.8, 1.0, 1.25, 1.5, 2.0]
+    static let speedOptions: [Float] = [1.0, 1.25, 1.5, 2.0, 0.8]
+
+    // MARK: - Sleep timer
+
+    enum SleepTimer: CaseIterable, Hashable {
+        case off, fifteen, thirty
+
+        var minutes: Int? {
+            switch self {
+            case .off:      return nil
+            case .fifteen:  return 15
+            case .thirty:   return 30
+            }
+        }
+
+        var label: String {
+            switch self {
+            case .off:      return "Сон"
+            case .fifteen:  return "15м"
+            case .thirty:   return "30м"
+            }
+        }
+
+        var isActive: Bool { self != .off }
+    }
+
+    private(set) var sleepTimer: SleepTimer = .off
+    private var sleepTimerTask: Task<Void, Never>?
 
     private let player = AVPlayer()
     private var timeObserver: Any?
@@ -69,6 +96,35 @@ final class PlayerService {
         player.seek(to: cm)
         currentTime = time
         updateNowPlayingInfo()
+    }
+
+    /// Тапом по кнопке скорости — циклически переключаем 1× → 1.25× → 1.5× → 2× → 0.8× → 1×.
+    func cycleSpeed() {
+        let all = Self.speedOptions
+        let idx = all.firstIndex(of: rate) ?? 0
+        rate = all[(idx + 1) % all.count]
+    }
+
+    /// Тапом по таймеру сна — Сон → 15м → 30м → Сон.
+    func cycleSleepTimer() {
+        let all = SleepTimer.allCases
+        let idx = all.firstIndex(of: sleepTimer) ?? 0
+        setSleepTimer(all[(idx + 1) % all.count])
+    }
+
+    func setSleepTimer(_ option: SleepTimer) {
+        sleepTimer = option
+        sleepTimerTask?.cancel()
+        guard let mins = option.minutes else { return }
+
+        sleepTimerTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(mins) * 60 * 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self?.pause()
+                self?.sleepTimer = .off
+            }
+        }
     }
 
     // MARK: - Private

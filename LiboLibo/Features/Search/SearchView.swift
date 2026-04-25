@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Объектный поиск: один запрос, результаты сгруппированы по типу — «Подкасты» и «Выпуски».
+/// Объектный поиск: один запрос — два списка результатов, сгруппированных по типу
+/// (Подкасты / Выпуски). Фильтрует по названию подкаста, имени издателя и тексту выпуска.
 struct SearchView: View {
     @Environment(PodcastsRepository.self) private var repository
     @Environment(PlayerService.self) private var player
@@ -21,6 +22,11 @@ struct SearchView: View {
                 )
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
+                .task {
+                    if repository.allEpisodes.isEmpty {
+                        await repository.loadAllEpisodes()
+                    }
+                }
         }
     }
 
@@ -33,7 +39,10 @@ struct SearchView: View {
     private var matchingPodcasts: [Podcast] {
         let q = trimmedQuery.localizedLowercase
         guard !q.isEmpty else { return [] }
-        return repository.podcasts.filter { $0.name.localizedLowercase.contains(q) }
+        return repository.podcasts.filter {
+            $0.name.localizedLowercase.contains(q)
+                || $0.artist.localizedLowercase.contains(q)
+        }
     }
 
     private var matchingEpisodes: [Episode] {
@@ -43,6 +52,7 @@ struct SearchView: View {
             .filter {
                 $0.title.localizedLowercase.contains(q)
                     || $0.summary.localizedLowercase.contains(q)
+                    || $0.podcastName.localizedLowercase.contains(q)
             }
             .prefix(50))
     }
@@ -101,7 +111,7 @@ private struct PodcastSearchRow: View {
                     Color.secondary.opacity(0.15)
                 }
             }
-            .frame(width: 48, height: 48)
+            .frame(width: 56, height: 56)
             .clipShape(RoundedRectangle(cornerRadius: 8))
 
             VStack(alignment: .leading, spacing: 2) {
@@ -113,6 +123,8 @@ private struct PodcastSearchRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Spacer(minLength: 0)
         }
+        .padding(.vertical, 2)
     }
 }

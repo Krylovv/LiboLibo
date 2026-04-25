@@ -6,98 +6,151 @@ struct PlayerView: View {
 
     var body: some View {
         if let episode = player.currentEpisode {
-            VStack(spacing: 24) {
+            ZStack {
+                // Размытый артворк как фон — даёт правильный амбиент-цвет
+                // и контраст под белый/чёрный текст в зависимости от обложки.
                 AsyncImage(url: episode.podcastArtworkUrl) { phase in
                     switch phase {
                     case .success(let image):
-                        image.resizable().aspectRatio(contentMode: .fill)
+                        image.resizable().scaledToFill().blur(radius: 80, opaque: true)
                     default:
-                        Color.secondary.opacity(0.15)
+                        Color.gray.opacity(0.1)
                     }
                 }
-                .aspectRatio(1, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 20))
-                .padding(.horizontal, 32)
-                .padding(.top, 24)
+                .ignoresSafeArea()
 
-                VStack(spacing: 6) {
-                    Text(episode.podcastName)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Text(episode.title)
-                        .font(.title3)
-                        .fontWeight(.semibold)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(3)
-                }
-                .padding(.horizontal, 24)
+                // Лёгкое затемнение для читаемости текста на любой обложке.
+                Color.black.opacity(0.25).ignoresSafeArea()
 
-                ProgressSlider()
-                    .padding(.horizontal, 24)
-
-                HStack(spacing: 36) {
-                    Button {
-                        player.skip(by: -10)
-                    } label: {
-                        Image(systemName: "gobackward.10")
-                            .font(.system(size: 32))
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        player.togglePlayPause()
-                    } label: {
-                        Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 64))
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        player.skip(by: 10)
-                    } label: {
-                        Image(systemName: "goforward.10")
-                            .font(.system(size: 32))
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.top, 8)
-
-                Menu {
-                    ForEach(PlayerService.speedOptions, id: \.self) { rate in
-                        Button {
-                            player.rate = rate
-                        } label: {
-                            HStack {
-                                Text(PlayerService.formatRate(rate))
-                                if player.rate == rate {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
+                VStack(spacing: 28) {
+                    AsyncImage(url: episode.podcastArtworkUrl) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        default:
+                            Color.secondary.opacity(0.15)
                         }
                     }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "speedometer")
-                        Text(PlayerService.formatRate(player.rate))
-                    }
-                    .font(.subheadline)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(.regularMaterial, in: Capsule())
-                }
+                    .aspectRatio(1, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                    .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
+                    .padding(.horizontal, 32)
+                    .padding(.top, 24)
 
-                Spacer()
+                    VStack(spacing: 8) {
+                        Text(episode.podcastName)
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.8))
+                            .lineLimit(1)
+                        Text(episode.title)
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.white)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(3)
+                    }
+                    .padding(.horizontal, 24)
+
+                    ProgressSlider()
+                        .padding(.horizontal, 24)
+
+                    HStack(spacing: 44) {
+                        ControlButton(systemImage: "gobackward.10", size: 32) {
+                            player.skip(by: -10)
+                        }
+
+                        Button {
+                            player.togglePlayPause()
+                        } label: {
+                            Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                                .font(.system(size: 72))
+                                .foregroundStyle(.white)
+                        }
+                        .buttonStyle(.plain)
+
+                        ControlButton(systemImage: "goforward.10", size: 32) {
+                            player.skip(by: 10)
+                        }
+                    }
+                    .padding(.top, 4)
+
+                    HStack(spacing: 12) {
+                        PillButton(
+                            icon: "speedometer",
+                            text: PlayerService.formatRate(player.rate),
+                            isHighlighted: player.rate != 1.0
+                        ) {
+                            player.cycleSpeed()
+                        }
+
+                        PillButton(
+                            icon: "moon.zzz",
+                            text: player.sleepTimer.label,
+                            isHighlighted: player.sleepTimer.isActive
+                        ) {
+                            player.cycleSleepTimer()
+                        }
+                    }
+
+                    Spacer()
+                }
+                .padding(.bottom, 24)
             }
-            .padding(.bottom, 24)
+            .preferredColorScheme(.dark)
         }
+    }
+}
+
+// MARK: - Components
+
+private struct ControlButton: View {
+    let systemImage: String
+    let size: CGFloat
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: size))
+                .foregroundStyle(.white)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct PillButton: View {
+    let icon: String
+    let text: String
+    let isHighlighted: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                Text(text)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .frame(minHeight: 44)
+            .background(
+                Capsule()
+                    .fill(isHighlighted ? Color.liboRed.opacity(0.85) : Color.white.opacity(0.18))
+            )
+            .foregroundStyle(.white)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 }
 
 private struct ProgressSlider: View {
     @Environment(PlayerService.self) private var player
     @State private var draggedValue: Double?
-    @State private var isDragging = false
 
     var body: some View {
         VStack(spacing: 6) {
@@ -113,13 +166,13 @@ private struct ProgressSlider: View {
                 ),
                 in: 0...1,
                 onEditingChanged: { editing in
-                    isDragging = editing
                     if !editing, let dv = draggedValue, player.duration > 0 {
                         player.seek(to: dv * player.duration)
                         draggedValue = nil
                     }
                 }
             )
+            .tint(.white)
 
             HStack {
                 Text(PlayerService.formatTime(player.currentTime))
@@ -128,7 +181,7 @@ private struct ProgressSlider: View {
             }
             .font(.caption)
             .monospacedDigit()
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.white.opacity(0.7))
         }
     }
 }

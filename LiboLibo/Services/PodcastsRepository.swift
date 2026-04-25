@@ -39,16 +39,21 @@ final class PodcastsRepository {
         allEpisodes = collected.sorted { $0.pubDate > $1.pubDate }
     }
 
-    /// Подгружает выпуски одного подкаста (для PodcastDetailView).
-    nonisolated static func fetchEpisodes(for podcast: Podcast) async -> [Episode] {
-        await fetch(podcast: podcast)
+    /// Подгружает RSS подкаста: channel description + список выпусков.
+    nonisolated static func fetchFeed(for podcast: Podcast) async -> (channel: PodcastChannelInfo, episodes: [Episode])? {
+        do {
+            let (data, _) = try await URLSession.shared.data(from: podcast.feedUrl)
+            return RSSParser.parse(data: data, podcast: podcast)
+        } catch {
+            return nil
+        }
     }
 
     nonisolated private static func fetchAll(podcasts: [Podcast]) async -> [Episode] {
         await withTaskGroup(of: [Episode].self) { group in
             for podcast in podcasts {
                 group.addTask {
-                    await fetch(podcast: podcast)
+                    await fetchEpisodesOnly(podcast: podcast)
                 }
             }
             var all: [Episode] = []
@@ -59,13 +64,8 @@ final class PodcastsRepository {
         }
     }
 
-    nonisolated private static func fetch(podcast: Podcast) async -> [Episode] {
-        do {
-            let (data, _) = try await URLSession.shared.data(from: podcast.feedUrl)
-            return RSSParser.parse(data: data, podcast: podcast)
-        } catch {
-            return []
-        }
+    nonisolated private static func fetchEpisodesOnly(podcast: Podcast) async -> [Episode] {
+        await fetchFeed(for: podcast)?.episodes ?? []
     }
 }
 

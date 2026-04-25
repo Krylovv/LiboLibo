@@ -2,6 +2,8 @@ import SwiftUI
 
 struct EpisodeRow: View {
     let episode: Episode
+    /// Показывать превью описания (первое предложение, либо два если первое короче 2 слов).
+    var showsPreview: Bool = true
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -20,11 +22,23 @@ struct EpisodeRow: View {
                 Text(episode.podcastName)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
 
                 Text(episode.title)
                     .font(.subheadline)
                     .fontWeight(.semibold)
                     .lineLimit(2)
+
+                if showsPreview {
+                    let preview = episode.summary.firstSentences(maxCount: 2)
+                    if !preview.isEmpty {
+                        Text(preview)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .padding(.top, 2)
+                    }
+                }
 
                 HStack(spacing: 6) {
                     Text(episode.pubDate, style: .date)
@@ -35,10 +49,11 @@ struct EpisodeRow: View {
                 }
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .padding(.top, 2)
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
     }
 }
 
