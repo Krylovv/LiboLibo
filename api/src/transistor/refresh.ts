@@ -1,11 +1,21 @@
 import { prisma } from "../db.js";
-import { parseRSS } from "./parser.js";
 import * as api from "./api.js";
+import { fetchPublicMediaUrls } from "./public-rss.js";
+
+// Источник метаданных — Transistor API. Public RSS используется ТОЛЬКО как
+// gate-сигнал: если эпизод есть в API, но его media_url нет в публичном RSS,
+// значит, Transistor его прячет за пэйволом (Exclusive Episode). На уровне
+// API такого флага нет (см. docs.transistor.fm), это единственный способ
+// отличить exclusive от обычного published-эпизода.
+//
+// is_premium = (mediaUrl ∉ publicMediaUrls) || type === "bonus"
+//
+// Episode.id = Transistor episode id (например, "3195076").
 
 interface RefreshResult {
   podcastId: bigint;
-  status: "ok" | "not-modified" | "error";
-  publicEpisodes?: number;
+  status: "ok" | "error";
+  episodes?: number;
   premiumEpisodes?: number;
   error?: string;
 }
@@ -13,330 +23,241 @@ interface RefreshResult {
 export interface RefreshSummary {
   total: number;
   ok: number;
-  notModified: number;
   errors: number;
   apiEnabled: boolean;
   results: RefreshResult[];
 }
 
-const CONCURRENCY = 8;
+export interface RefreshOptions {
+  // Если задан — рефрешим только подкасты с этими id. Используется CLI
+  // для точечной проверки одного подкаста.
+  onlyPodcastIds?: bigint[];
+}
 
-export async function refreshAllFeeds(): Promise<RefreshSummary> {
+export async function refreshAllFeeds(opts: RefreshOptions = {}): Promise<RefreshSummary> {
   const apiEnabled = api.isConfigured();
-  const podcasts = await prisma.podcast.findMany({
-    include: { feedFetch: true },
-  });
+  const podcasts = opts.onlyPodcastIds && opts.onlyPodcastIds.length > 0
+    ? await prisma.podcast.findMany({ where: { id: { in: opts.onlyPodcastIds } } })
+    : await prisma.podcast.findMany();
 
   console.log(
-    `[refresh] starting: ${podcasts.length} podcasts, transistor api ${apiEnabled ? "enabled" : "disabled"}`,
+    `[refresh] starting: ${podcasts.length} podcasts${opts.onlyPodcastIds ? " (filtered)" : ""}, transistor api ${apiEnabled ? "enabled" : "disabled"}`,
   );
 
-  // Pull the entire account from Transistor in two paginated calls (one for
-  // shows, one for all episodes) instead of issuing per-podcast requests.
-  // Per-podcast fan-out used to trigger Transistor's HTTP 429 rate limit,
-  // which left transistorShowId unset and premium episodes never syncing.
-  let showIdByFeedUrl: Map<string, string> | null = null;
-  let episodesByShowId: Map<string, api.TransistorEpisode[]> | null = null;
-  if (apiEnabled) {
-    try {
-      showIdByFeedUrl = await api.listAllShowsByFeedUrl();
-      episodesByShowId = await api.listAllEpisodesByShowId();
-      const totalEps = Array.from(episodesByShowId.values()).reduce(
-        (n, arr) => n + arr.length,
-        0,
-      );
-      console.log(
-        `[transistor-api] account fetch ok: ${showIdByFeedUrl.size} shows, ${totalEps} episodes total`,
-      );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[transistor-api] account fetch failed: ${msg}`);
-      showIdByFeedUrl = null;
-      episodesByShowId = null;
-    }
+  if (!apiEnabled) {
+    console.error("[refresh] TRANSISTOR_API_KEY missing — refresh aborted");
+    return {
+      total: podcasts.length,
+      ok: 0,
+      errors: podcasts.length,
+      apiEnabled: false,
+      results: podcasts.map((p) => ({
+        podcastId: p.id,
+        status: "error" as const,
+        error: "TRANSISTOR_API_KEY missing",
+      })),
+    };
+  }
+
+  let showsByFeedUrl: Map<string, api.TransistorShow>;
+  let episodesByShowId: Map<string, api.TransistorEpisode[]>;
+  try {
+    showsByFeedUrl = await api.listAllShowsByFeedUrl();
+    episodesByShowId = await api.listAllEpisodesByShowId();
+    const totalEps = Array.from(episodesByShowId.values()).reduce(
+      (n, arr) => n + arr.length,
+      0,
+    );
+    console.log(
+      `[transistor-api] account fetch ok: ${showsByFeedUrl.size} shows, ${totalEps} episodes total`,
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[transistor-api] account fetch failed: ${msg}`);
+    return {
+      total: podcasts.length,
+      ok: 0,
+      errors: podcasts.length,
+      apiEnabled: true,
+      results: podcasts.map((p) => ({
+        podcastId: p.id,
+        status: "error" as const,
+        error: msg,
+      })),
+    };
   }
 
   const results: RefreshResult[] = [];
-  let i = 0;
-  let processed = 0;
   const total = podcasts.length;
+  let processed = 0;
 
-  await Promise.all(
-    Array.from({ length: CONCURRENCY }, async () => {
-      while (i < podcasts.length) {
-        const podcast = podcasts[i++];
-        if (!podcast) break;
-        const result = await refreshOne(podcast, apiEnabled, showIdByFeedUrl, episodesByShowId);
-        results.push(result);
-        processed += 1;
-        const tag = result.status === "error"
-          ? `error: ${result.error}`
-          : `${result.status} public=${result.publicEpisodes ?? 0} premium=${result.premiumEpisodes ?? 0}`;
-        console.log(`[refresh] ${processed}/${total} ${podcast.name} → ${tag}`);
-      }
-    }),
-  );
+  for (const podcast of podcasts) {
+    const result = await refreshOne(podcast, showsByFeedUrl, episodesByShowId);
+    results.push(result);
+    processed += 1;
+    const tag = result.status === "error"
+      ? `error: ${result.error}`
+      : `ok episodes=${result.episodes ?? 0} premium=${result.premiumEpisodes ?? 0}`;
+    console.log(`[refresh] ${processed}/${total} ${podcast.name} → ${tag}`);
+  }
 
   return {
     total: results.length,
     ok: results.filter((r) => r.status === "ok").length,
-    notModified: results.filter((r) => r.status === "not-modified").length,
     errors: results.filter((r) => r.status === "error").length,
-    apiEnabled,
+    apiEnabled: true,
     results,
   };
 }
 
-type PodcastWithFetch = Awaited<
-  ReturnType<typeof prisma.podcast.findMany>
->[number] & {
-  feedFetch: { etag: string | null; lastModified: string | null } | null;
-};
+type Podcast = Awaited<ReturnType<typeof prisma.podcast.findMany>>[number];
 
 async function refreshOne(
-  podcast: PodcastWithFetch,
-  apiEnabled: boolean,
-  showIdByFeedUrl: Map<string, string> | null,
-  episodesByShowId: Map<string, api.TransistorEpisode[]> | null,
+  podcast: Podcast,
+  showsByFeedUrl: Map<string, api.TransistorShow>,
+  episodesByShowId: Map<string, api.TransistorEpisode[]>,
 ): Promise<RefreshResult> {
-  // Step 1: fetch the public RSS. This is the source of truth for which
-  // episodes are PUBLIC; everything else (visible only via API) is premium.
-  const rssResult = await fetchPublicRSS(podcast);
-  if (rssResult.kind === "error") {
-    await markError(podcast.id, rssResult.error);
-    return { podcastId: podcast.id, status: "error", error: rssResult.error };
+  const show =
+    showsByFeedUrl.get(podcast.feedUrl) ??
+    (podcast.transistorShowId
+      ? Array.from(showsByFeedUrl.values()).find(
+          (s) => s.id === podcast.transistorShowId,
+        )
+      : undefined);
+
+  if (!show) {
+    const msg = "show not found in Transistor account";
+    await markError(podcast.id, msg);
+    return { podcastId: podcast.id, status: "error", error: msg };
   }
 
-  const publicGuids = new Set(rssResult.feed.episodes.map((e) => e.id));
-  let premiumCount = 0;
-
-  // Step 2: if we have a Transistor API key and the bulk fetch succeeded,
-  // mark anything not in publicGuids as premium.
-  if (apiEnabled && episodesByShowId) {
-    try {
-      premiumCount = await syncPremiumFromBulk(
-        podcast,
-        publicGuids,
-        showIdByFeedUrl,
-        episodesByShowId,
-      );
-    } catch (err) {
-      // API failure must not block public episode ingestion — log and continue.
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[transistor-api] podcast=${podcast.id}: ${msg}`);
-    }
+  if (show.id !== podcast.transistorShowId) {
+    await prisma.podcast.update({
+      where: { id: podcast.id },
+      data: { transistorShowId: show.id },
+    });
   }
 
-  // Step 3: persist public episodes (parsed from RSS).
-  if (rssResult.kind === "fresh") {
-    await upsertEpisodes(
-      podcast.id,
-      rssResult.feed.episodes.map((e) => ({
-        id: e.id,
-        title: e.title,
-        summary: e.summary,
-        pubDate: e.pubDate,
-        durationSec: e.durationSec,
-        audioUrl: e.audioUrl,
-        isPremium: false,
-      })),
+  const apiEpisodes = episodesByShowId.get(show.id) ?? [];
+
+  // Тянем публичный RSS, чтобы определить, какие эпизоды реально доступны
+  // публично. Те, что Transistor прячет за пэйволом (Exclusive), там
+  // отсутствуют. Если RSS недоступен — fallback на bonus-only логику и
+  // лог-предупреждение.
+  let publicMediaUrls: Set<string> | null = null;
+  try {
+    publicMediaUrls = await fetchPublicMediaUrls(podcast.feedUrl);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `[refresh] podcast=${podcast.id} public RSS fetch failed (${msg}); ` +
+        `premium gating falls back to type==="bonus" only`,
     );
   }
 
-  // Step 4: write fetch state and refresh denormalized podcast metadata
-  // (channel description, lastEpisodeDate, hasPremium).
+  const items: EpisodeRow[] = [];
+  let premiumCount = 0;
+  for (const ep of apiEpisodes) {
+    if (ep.status !== "published") continue;
+    if (!ep.mediaUrl || !ep.pubDate) continue;
+
+    const notInPublicRSS = publicMediaUrls
+      ? !publicMediaUrls.has(ep.mediaUrl)
+      : false;
+    const isPremium = notInPublicRSS || ep.type === "bonus";
+    if (isPremium) premiumCount += 1;
+
+    items.push({
+      id: ep.id,
+      title: ep.title,
+      summary: ep.summary,
+      pubDate: ep.pubDate,
+      durationSec: ep.durationSec,
+      audioUrl: ep.mediaUrl,
+      isPremium,
+    });
+  }
+
+  await upsertEpisodes(podcast.id, items);
+
   await prisma.feedFetch.upsert({
     where: { podcastId: podcast.id },
     create: {
       podcastId: podcast.id,
-      etag: rssResult.etag,
-      lastModified: rssResult.lastModified,
+      etag: null,
+      lastModified: null,
       lastOkAt: new Date(),
       lastError: null,
     },
     update: {
-      etag: rssResult.etag,
-      lastModified: rssResult.lastModified,
+      etag: null,
+      lastModified: null,
       lastOkAt: new Date(),
       lastError: null,
     },
   });
 
-  await refreshPodcastMetadata(podcast, rssResult.feed.channel.description, premiumCount);
+  await refreshPodcastMetadata(podcast, show, items, premiumCount);
 
   return {
     podcastId: podcast.id,
-    status: rssResult.kind === "not-modified" ? "not-modified" : "ok",
-    publicEpisodes: rssResult.feed.episodes.length,
+    status: "ok",
+    episodes: items.length,
     premiumEpisodes: premiumCount,
   };
 }
 
-// Recomputes denormalized fields on Podcast: channel description (when refreshed
-// from RSS), `lastEpisodeDate` (max pubDate across all episodes), `hasPremium`.
 async function refreshPodcastMetadata(
-  podcast: PodcastWithFetch,
-  channelDescription: string | null,
+  podcast: Podcast,
+  show: api.TransistorShow,
+  items: EpisodeRow[],
   premiumCount: number,
 ) {
-  const latest = await prisma.episode.findFirst({
-    where: { podcastId: podcast.id },
-    orderBy: { pubDate: "desc" },
-    select: { pubDate: true },
-  });
+  const latestPubDate = items.reduce<Date | null>(
+    (acc, e) => (acc && acc.getTime() > e.pubDate.getTime() ? acc : e.pubDate),
+    null,
+  );
 
   const updates: {
     description?: string;
+    artworkUrl?: string;
     lastEpisodeDate?: Date | null;
     hasPremium?: boolean;
   } = {};
 
-  // Update description only if RSS gave us a non-empty one — don't clobber
-  // a good seed value with null on a 304 path.
-  if (channelDescription && channelDescription !== podcast.description) {
-    updates.description = channelDescription;
+  if (show.description && show.description !== podcast.description) {
+    updates.description = show.description;
   }
-  if (latest && latest.pubDate.getTime() !== podcast.lastEpisodeDate?.getTime()) {
-    updates.lastEpisodeDate = latest.pubDate;
+  if (show.imageUrl && show.imageUrl !== podcast.artworkUrl) {
+    updates.artworkUrl = show.imageUrl;
   }
-  if (premiumCount > 0 && !podcast.hasPremium) {
-    updates.hasPremium = true;
+  if (
+    latestPubDate &&
+    latestPubDate.getTime() !== podcast.lastEpisodeDate?.getTime()
+  ) {
+    updates.lastEpisodeDate = latestPubDate;
+  }
+  const shouldHavePremium = premiumCount > 0;
+  if (shouldHavePremium !== podcast.hasPremium) {
+    updates.hasPremium = shouldHavePremium;
   }
 
   if (Object.keys(updates).length === 0) return;
   await prisma.podcast.update({ where: { id: podcast.id }, data: updates });
 }
 
-// --- helpers ---------------------------------------------------------------
-
-type ParsedFeed = ReturnType<typeof parseRSS>;
-
-interface RSSFresh {
-  kind: "fresh";
-  feed: ParsedFeed;
-  etag: string | null;
-  lastModified: string | null;
-}
-interface RSSNotModified {
-  kind: "not-modified";
-  feed: ParsedFeed;
-  etag: string | null;
-  lastModified: string | null;
-}
-interface RSSError { kind: "error"; error: string }
-
-async function fetchPublicRSS(
-  podcast: PodcastWithFetch,
-): Promise<RSSFresh | RSSNotModified | RSSError> {
-  const headers: Record<string, string> = {
-    "User-Agent":
-      "LiboLibo-API/0.1 (+https://github.com/Krasilshchik3000/LiboLibo)",
-    Accept: "application/rss+xml, application/xml, text/xml",
-  };
-  if (podcast.feedFetch?.etag) headers["If-None-Match"] = podcast.feedFetch.etag;
-  if (podcast.feedFetch?.lastModified)
-    headers["If-Modified-Since"] = podcast.feedFetch.lastModified;
-
-  try {
-    const resp = await fetch(podcast.feedUrl, { headers });
-
-    if (resp.status === 304) {
-      // Episodes are still in DB — pass an empty parsed feed, no upsert needed.
-      return {
-        kind: "not-modified",
-        feed: { channel: { description: null }, episodes: [] },
-        etag: podcast.feedFetch?.etag ?? null,
-        lastModified: podcast.feedFetch?.lastModified ?? null,
-      };
-    }
-    if (!resp.ok) {
-      return { kind: "error", error: `HTTP ${resp.status}` };
-    }
-
-    const xmlBody = await resp.text();
-    return {
-      kind: "fresh",
-      feed: parseRSS(xmlBody),
-      etag: resp.headers.get("etag"),
-      lastModified: resp.headers.get("last-modified"),
-    };
-  } catch (err) {
-    return {
-      kind: "error",
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
+interface EpisodeRow {
+  id: string;
+  title: string;
+  summary: string | null;
+  pubDate: Date;
+  durationSec: number | null;
+  audioUrl: string;
+  isPremium: boolean;
 }
 
-// Picks the podcast's premium episodes out of the pre-fetched account-wide
-// bulk and upserts them. Resolves show id via the cached value or the bulk
-// shows map (and persists it on first sight so future runs need fewer
-// lookups).
-async function syncPremiumFromBulk(
-  podcast: PodcastWithFetch,
-  publicGuids: Set<string>,
-  showIdByFeedUrl: Map<string, string> | null,
-  episodesByShowId: Map<string, api.TransistorEpisode[]>,
-): Promise<number> {
-  const showId =
-    podcast.transistorShowId ?? showIdByFeedUrl?.get(podcast.feedUrl) ?? null;
-  if (!showId) return 0;
-  if (showId !== podcast.transistorShowId) {
-    await prisma.podcast.update({
-      where: { id: podcast.id },
-      data: { transistorShowId: showId },
-    });
-  }
-
-  const apiEpisodes = episodesByShowId.get(showId) ?? [];
-  const premium: Array<{
-    id: string;
-    title: string;
-    summary: string | null;
-    pubDate: Date;
-    durationSec: number | null;
-    audioUrl: string;
-    isPremium: boolean;
-  }> = [];
-
-  for (const ep of apiEpisodes) {
-    // Only published episodes are real; skip drafts/scheduled.
-    if (ep.status !== "published") continue;
-    if (!ep.mediaUrl || !ep.pubDate) continue;
-
-    // Use guid if available, else fall back to media URL (same rule as RSS).
-    const guid = ep.guid ?? ep.mediaUrl;
-    if (publicGuids.has(guid)) continue; // public — already covered by RSS
-
-    premium.push({
-      id: guid,
-      title: ep.title,
-      summary: ep.summary,
-      pubDate: ep.pubDate,
-      durationSec: ep.durationSec,
-      audioUrl: ep.mediaUrl,
-      isPremium: true,
-    });
-  }
-
-  if (premium.length > 0) {
-    await upsertEpisodes(podcast.id, premium);
-  }
-  return premium.length;
-}
-
-async function upsertEpisodes(
-  podcastId: bigint,
-  items: Array<{
-    id: string;
-    title: string;
-    summary: string | null;
-    pubDate: Date;
-    durationSec: number | null;
-    audioUrl: string;
-    isPremium: boolean;
-  }>,
-) {
+async function upsertEpisodes(podcastId: bigint, items: EpisodeRow[]) {
+  if (items.length === 0) return;
   await prisma.$transaction(
     items.map((e) =>
       prisma.episode.upsert({

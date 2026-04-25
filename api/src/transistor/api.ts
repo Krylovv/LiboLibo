@@ -26,6 +26,8 @@ function authHeaders(): Record<string, string> {
 export interface TransistorShow {
   id: string;
   feedUrl: string;
+  description: string | null;
+  imageUrl: string | null;
 }
 
 export interface TransistorEpisode {
@@ -59,6 +61,8 @@ interface JsonApiList<A> {
 
 interface ShowAttrs {
   feed_url?: string | null;
+  description?: string | null;
+  image_url?: string | null;
 }
 
 interface EpisodeAttrs {
@@ -102,11 +106,10 @@ async function getJSON<T>(path: string, query?: Record<string, string>): Promise
 }
 
 // All shows visible to the current API key, keyed by their `feed_url`.
-// One bulk fetch replaces N per-podcast `findShowIdByFeedUrl` calls — without
-// this, refreshing dozens of podcasts in parallel hammered Transistor and
-// most calls came back as HTTP 429.
-export async function listAllShowsByFeedUrl(): Promise<Map<string, string>> {
-  const map = new Map<string, string>();
+// Returns the full TransistorShow (id + description + image_url) so refresh
+// can update the podcast's denormalized fields without an extra fetch.
+export async function listAllShowsByFeedUrl(): Promise<Map<string, TransistorShow>> {
+  const map = new Map<string, TransistorShow>();
   let page = 1;
   for (;;) {
     const list = await getJSON<JsonApiList<ShowAttrs>>("/shows", {
@@ -115,7 +118,13 @@ export async function listAllShowsByFeedUrl(): Promise<Map<string, string>> {
     });
     for (const s of list.data) {
       const url = s.attributes.feed_url;
-      if (url) map.set(url, s.id);
+      if (!url) continue;
+      map.set(url, {
+        id: s.id,
+        feedUrl: url,
+        description: stripHTML(s.attributes.description ?? null),
+        imageUrl: s.attributes.image_url ?? null,
+      });
     }
     const total = list.meta?.totalPages ?? 1;
     console.log(
