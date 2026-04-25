@@ -26,17 +26,49 @@ xcuserdata/
 # Swift Package Manager
 .build/
 Packages/
-Package.pins
-Package.resolved
 .swiftpm/
 
-# CocoaPods (если будем использовать)
+# CocoaPods
 Pods/
 
-# Secrets
+# Node.js (бэкенд Самата, если когда-нибудь окажется в этом репо)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# === SECRETS — никогда не коммитим ===
+# Переменные окружения
 .env
 .env.*
 !.env.example
+
+# Сертификаты, ключи, провижены
 *.p12
+*.pem
+*.key
+*.cer
+*.crt
+*.pfx
 *.mobileprovision
+*.keystore
+*.jks
+
+# Конкретные конфиги с секретами
 GoogleService-Info.plist
+firebase-adminsdk-*.json
+*-service-account*.json
+credentials.json
+*-credentials.json
+secrets/
+config/secrets.*
+
+# SSH
+id_rsa
+id_rsa.*
+*.ppk
+
+# Облачные CLI
+.aws/
+.gcloud/
