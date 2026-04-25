@@ -1,10 +1,15 @@
 import type { Episode, Podcast } from "@prisma/client";
 
 // Shape returned by /v1/podcasts and friends.
+//
+// Контракт по типам (см. docs/specs/step-02-backend.md, секция «Контракт по
+// типам» и openapi.yaml): `artist` всегда присутствует как строка — если в
+// RSS поле пустое, бэкенд подставляет `""`. Это позволяет iOS-модели
+// `Podcast.artist` оставаться non-optional `String`.
 export interface PodcastDTO {
   id: number;
   name: string;
-  artist: string | null;
+  artist: string;
   feed_url: string;
   artwork_url: string | null;
   description: string | null;
@@ -15,13 +20,15 @@ export interface PodcastDTO {
   last_episode_date: string | null;
 }
 
+// Аналогично PodcastDTO: `summary` всегда строка (возможно пустая) — в RSS
+// бывает отсутствует, тогда отдаётся `""`.
 export interface EpisodeDTO {
   id: string;
   podcast_id: number;
   podcast_name: string;
   podcast_artwork_url: string | null;
   title: string;
-  summary: string | null;
+  summary: string;
   pub_date: string;
   duration_sec: number | null;
   audio_url: string | null;
@@ -32,7 +39,7 @@ export function podcastToDTO(p: Podcast): PodcastDTO {
   return {
     id: Number(p.id),
     name: p.name,
-    artist: p.artist,
+    artist: p.artist ?? "",
     feed_url: p.feedUrl,
     artwork_url: p.artworkUrl,
     description: p.description,
@@ -70,7 +77,7 @@ export function episodeToDTO(
     podcast_name: podcast.name,
     podcast_artwork_url: podcast.artworkUrl,
     title: e.title,
-    summary: e.summary,
+    summary: e.summary ?? "",
     pub_date: e.pubDate.toISOString(),
     duration_sec: e.durationSec,
     audio_url: audioUrl,
