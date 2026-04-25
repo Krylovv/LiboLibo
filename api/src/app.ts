@@ -6,6 +6,7 @@ import { episodesRouter } from "./routes/episodes.js";
 import { devicesRouter } from "./routes/devices.js";
 import { meRouter } from "./routes/me.js";
 import { legalRouter } from "./routes/legal.js";
+import { mediaRouter } from "./routes/media.js";
 
 export function createApp() {
   const app = express();
@@ -30,6 +31,9 @@ export function createApp() {
   app.use("/v1", episodesRouter);
   app.use("/v1", devicesRouter);
   app.use("/v1", meRouter);
+
+  // Раздача Instagram-медиа (Phase 3.B). Файлы лежат на Railway volume.
+  app.use("/media", mediaRouter);
 
   // Legal pages — served at the root, не под /v1, чтобы URL были короткие
   // и удобные для App Store / In-App-листинга.
