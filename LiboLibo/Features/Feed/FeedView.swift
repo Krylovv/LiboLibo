@@ -2,6 +2,7 @@ import SwiftUI
 
 struct FeedView: View {
     @Environment(PodcastsRepository.self) private var repository
+    @Environment(PlayerService.self) private var player
 
     var body: some View {
         NavigationStack {
@@ -31,7 +32,12 @@ struct FeedView: View {
             )
         } else {
             List(repository.allEpisodes) { episode in
-                EpisodeRow(episode: episode)
+                Button {
+                    player.play(episode)
+                } label: {
+                    EpisodeRow(episode: episode)
+                }
+                .buttonStyle(.plain)
             }
             .listStyle(.plain)
         }
@@ -41,4 +47,5 @@ struct FeedView: View {
 #Preview {
     FeedView()
         .environment(PodcastsRepository())
+        .environment(PlayerService())
 }

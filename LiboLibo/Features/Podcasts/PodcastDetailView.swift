@@ -3,6 +3,8 @@ import SwiftUI
 struct PodcastDetailView: View {
     let podcast: Podcast
 
+    @Environment(PlayerService.self) private var player
+
     @State private var episodes: [Episode] = []
     @State private var isLoading = false
     @State private var loadError: String?
@@ -48,7 +50,12 @@ struct PodcastDetailView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(episodes) { episode in
-                        EpisodeRow(episode: episode)
+                        Button {
+                            player.play(episode)
+                        } label: {
+                            EpisodeRow(episode: episode)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
