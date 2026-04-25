@@ -12,6 +12,7 @@
 |---|---|---|
 | `api/.env` (необязательный) | `DATABASE_URL`, `PORT` | Только если запускаешь без Docker |
 | `api/transistor.env` | `TRANSISTOR_API_KEY` | Чтобы тянуть премиум-эпизоды через API Transistor |
+| `api/instagram.env` | `META_ACCESS_TOKEN`, `META_IG_USER_ID` | Чтобы тянуть посты Instagram через Graph API |
 
 Шаблоны без значений: `.env.example`, `transistor.env.example`. На Railway эти переменные ставятся в Variables сервиса, файлы туда не нужны.
 
@@ -112,6 +113,33 @@ railway run --service cron-refresh npm run refresh
 
 Или через UI: Cron Service → "Run Now".
 
+## Instagram collector
+
+Стягивает посты Instagram-аккаунта Либо-Либо (`@libolibostudio`) через
+Graph API и складывает в таблицу `instagram_posts` со статусом `PENDING`.
+Файлы медиа на этом этапе **не скачиваются** — это будет downloader (Фаза B).
+
+На Railway работает отдельный Cron Service, запускающий
+`npm run refresh:instagram` каждые 30 минут. Спека —
+[`docs/specs/step-03-instagram-feed.md`](../docs/specs/step-03-instagram-feed.md).
+
+Локально:
+
+```bash
+cd api
+cp instagram.env.example instagram.env
+# заполнить META_ACCESS_TOKEN (long-lived Page token) и META_IG_USER_ID
+set -a && source instagram.env && set +a
+npm run refresh:instagram
+```
+
+Без `instagram.env` API запустится, а CLI выведет
+`{"apiEnabled": false}` и завершится без обращения к БД.
+
+Получить long-lived Page token: спека, раздел «Источник данных».
+Токен бесконечный, пока используется (data-access-expiry 90 дней
+сбрасывается каждым запросом cron'а).
+
 ## Структура
 
 ```
@@ -121,6 +149,7 @@ src/
   db.ts              # один PrismaClient
   routes/            # health, podcasts, feed, episodes, devices
   transistor/        # парсер RSS, воркер обновления, CLI для cron-сервиса
+  instagram/         # Graph API клиент, collector, CLI (Фаза 3.A)
   lib/               # cursor pagination, async wrapper, serialization, seed
 prisma/schema.prisma # модели БД
 test/                # vitest
