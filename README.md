@@ -20,3 +20,21 @@
 - **Android:** Kotlin (после стабилизации iOS, перенос с помощью AI)
 - **Backend:** Node.js (стек развёртывания на стороне Самата)
 - **Источник контента:** RSS-фиды подкастов Либо-Либо
+
+## Билд и запуск (iOS)
+
+Требования: macOS, Xcode 16+, [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+
+```bash
+brew install xcodegen          # один раз
+xcodegen generate              # создаёт LiboLibo.xcodeproj из project.yml
+open LiboLibo.xcodeproj        # → Xcode → Cmd+R
+```
+
+Без UI:
+
+```bash
+xcodebuild -scheme LiboLibo -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17' build
+```
+
+`*.xcodeproj/` в репо не коммитится — единственный источник правды это `project.yml`. Текущий план разработки и фазы — в [docs/specs/step-01-ios-skeleton.md](docs/specs/step-01-ios-skeleton.md).
