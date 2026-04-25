@@ -1,20 +1,18 @@
 import SwiftUI
 
-/// Объектный поиск: один запрос — два списка результатов, сгруппированных по типу
-/// (Подкасты / Выпуски). Фильтрует по названию подкаста, имени издателя и тексту выпуска.
 struct SearchView: View {
     @Environment(PodcastsRepository.self) private var repository
     @Environment(PlayerService.self) private var player
 
     @State private var query = ""
+    @State private var path = NavigationPath()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             content
                 .navigationTitle("Поиск")
-                .navigationDestination(for: Podcast.self) { podcast in
-                    PodcastDetailView(podcast: podcast)
-                }
+                .navigationDestination(for: Podcast.self) { PodcastDetailView(podcast: $0) }
+                .navigationDestination(for: Episode.self) { EpisodeDetailView(episode: $0) }
                 .searchable(
                     text: $query,
                     placement: .navigationBarDrawer(displayMode: .always),
@@ -29,8 +27,6 @@ struct SearchView: View {
                 }
         }
     }
-
-    // MARK: - Filtering
 
     private var trimmedQuery: String {
         query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -57,8 +53,6 @@ struct SearchView: View {
             .prefix(50))
     }
 
-    // MARK: - Content
-
     @ViewBuilder
     private var content: some View {
         if trimmedQuery.isEmpty {
@@ -84,12 +78,11 @@ struct SearchView: View {
                 if !matchingEpisodes.isEmpty {
                     Section("Выпуски") {
                         ForEach(matchingEpisodes) { episode in
-                            Button {
-                                player.play(episode)
-                            } label: {
-                                EpisodeRow(episode: episode)
-                            }
-                            .buttonStyle(.plain)
+                            EpisodeListItem(
+                                episode: episode,
+                                onPlay: { player.play(episode) },
+                                onShowDetail: { path.append(episode) }
+                            )
                         }
                     }
                 }

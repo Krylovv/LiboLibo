@@ -26,6 +26,10 @@ final class PlayerService {
     /// Используется HistoryService, чтобы записать факт прослушивания.
     var onPlay: ((Episode) -> Void)?
 
+    /// Резолвер локального URL для оффлайн-воспроизведения.
+    /// Если выпуск скачан — DownloadService возвращает локальный URL и плеер играет с диска.
+    var localUrlResolver: ((Episode) -> URL?)?
+
     static let speedOptions: [Float] = [1.0, 1.25, 1.5, 2.0, 0.8]
 
     // MARK: - Sleep timer
@@ -74,7 +78,8 @@ final class PlayerService {
         currentEpisode = episode
         currentTime = 0
         duration = 0
-        let item = AVPlayerItem(url: episode.audioUrl)
+        let url = localUrlResolver?(episode) ?? episode.audioUrl
+        let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
         player.play()
         player.rate = rate

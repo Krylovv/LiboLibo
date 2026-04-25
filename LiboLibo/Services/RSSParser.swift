@@ -168,18 +168,40 @@ private func stripHTML(_ string: String) -> String {
 // MARK: - Sentence helpers
 
 extension String {
+    /// Удаляет URL-ы (http/https/www.) и схлопывает оставшиеся пробелы.
+    /// URL не должны попадать в превью — точки в URL ломают разбиение на предложения.
+    var withoutURLs: String {
+        var s = self
+        s = s.replacingOccurrences(
+            of: #"\bhttps?://[^\s,;<>«»"']+"#,
+            with: "",
+            options: .regularExpression
+        )
+        s = s.replacingOccurrences(
+            of: #"\bwww\.[^\s,;<>«»"']+"#,
+            with: "",
+            options: .regularExpression
+        )
+        // Чистим хвостовые «:» / «—» / повторные пробелы, оставшиеся от вырезанного URL.
+        s = s.replacingOccurrences(of: #"[:\-–—]\s*$"#, with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Возвращает первое предложение строки. Если в нём меньше 2 слов — берём первые два.
+    /// Перед извлечением URL-ы вырезаются.
     func firstSentences(maxCount: Int = 2) -> String {
-        let trimmed = self.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "" }
+        let cleaned = self.withoutURLs
+        guard !cleaned.isEmpty else { return "" }
 
         var sentences: [String] = []
         var buffer = ""
-        for char in trimmed {
+        for char in cleaned {
             buffer.append(char)
             if ".!?".contains(char) {
                 let s = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !s.isEmpty { sentences.append(s) }
+                // Игнорируем «предложения» из 1–2 символов («.», «А.»), это аббревиатуры или мусор.
+                if s.count > 2 { sentences.append(s) }
                 buffer = ""
                 if sentences.count >= maxCount { break }
             }
@@ -188,7 +210,7 @@ extension String {
         if !leftover.isEmpty && sentences.count < maxCount {
             sentences.append(leftover)
         }
-        if sentences.isEmpty { return trimmed }
+        if sentences.isEmpty { return cleaned }
 
         // Если первое предложение короче 2 слов — добавляем второе (правило Ильи).
         let first = sentences[0]

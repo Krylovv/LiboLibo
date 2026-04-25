@@ -1,8 +1,14 @@
 import SwiftUI
 
+/// Карточка выпуска в стиле Apple Podcasts: крупная обложка слева, заголовок —
+/// `.headline`, превью описания — `.subheadline` (.secondary), внизу — кнопка-капсула
+/// «Слушать» с длительностью и датой.
+///
+/// Сама строка — без обёрток в NavigationLink/Button: тапы вешает родитель
+/// (FeedView и др.), чтобы каждый список мог решить, что делать тап в основной зоне
+/// (играть) и тап в info-кнопке (детали).
 struct EpisodeRow: View {
     let episode: Episode
-    /// Показывать превью описания (первое предложение, либо два если первое короче 2 слов).
     var showsPreview: Bool = true
 
     var body: some View {
@@ -15,8 +21,8 @@ struct EpisodeRow: View {
                     Color.secondary.opacity(0.15)
                 }
             }
-            .frame(width: 56, height: 56)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .frame(width: 80, height: 80)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(episode.podcastName)
@@ -25,35 +31,45 @@ struct EpisodeRow: View {
                     .lineLimit(1)
 
                 Text(episode.title)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
                     .lineLimit(2)
 
                 if showsPreview {
                     let preview = episode.summary.firstSentences(maxCount: 2)
                     if !preview.isEmpty {
                         Text(preview)
-                            .font(.footnote)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
                             .padding(.top, 2)
                     }
                 }
 
-                HStack(spacing: 6) {
-                    Text(episode.pubDate, style: .date)
-                    if let dur = episode.duration {
-                        Text("·")
-                        Text(formatDuration(dur))
-                    }
+                HStack(spacing: 8) {
+                    Image(systemName: "play.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.liboRed)
+
+                    Text(metadataLine)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .padding(.top, 2)
+                .padding(.top, 4)
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
+    }
+
+    private var metadataLine: String {
+        var parts: [String] = []
+        parts.append(episode.pubDate.formatted(date: .abbreviated, time: .omitted))
+        if let dur = episode.duration {
+            parts.append(formatDuration(dur))
+        }
+        return parts.joined(separator: " · ")
     }
 }
 

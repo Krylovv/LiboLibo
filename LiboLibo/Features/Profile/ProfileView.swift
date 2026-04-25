@@ -4,7 +4,10 @@ struct ProfileView: View {
     @Environment(PodcastsRepository.self) private var repository
     @Environment(SubscriptionsService.self) private var subscriptions
     @Environment(HistoryService.self) private var history
+    @Environment(DownloadService.self) private var downloads
     @Environment(PlayerService.self) private var player
+
+    @State private var path = NavigationPath()
 
     private var subscribedPodcasts: [Podcast] {
         repository.podcasts.filter { subscriptions.isSubscribed($0) }
@@ -21,27 +24,29 @@ struct ProfileView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 subscriptionsSection
+                if !downloads.items.isEmpty {
+                    downloadedSection
+                }
                 if !recentFromSubscriptions.isEmpty {
                     recentSection
                 }
                 if !history.items.isEmpty {
                     historySection
                 }
-                if subscribedPodcasts.isEmpty && history.items.isEmpty {
+                if subscribedPodcasts.isEmpty
+                    && history.items.isEmpty
+                    && downloads.items.isEmpty {
                     emptyState
                 }
             }
             .navigationTitle("Моё")
-            .navigationDestination(for: Podcast.self) { podcast in
-                PodcastDetailView(podcast: podcast)
-            }
+            .navigationDestination(for: Podcast.self) { PodcastDetailView(podcast: $0) }
+            .navigationDestination(for: Episode.self) { EpisodeDetailView(episode: $0) }
         }
     }
-
-    // MARK: - Sections
 
     private var subscriptionsSection: some View {
         Section("Подписки") {
@@ -74,15 +79,34 @@ struct ProfileView: View {
         }
     }
 
+    private var downloadedSection: some View {
+        Section("Скачано") {
+            ForEach(downloads.items) { item in
+                let episode = item.asEpisode
+                EpisodeListItem(
+                    episode: episode,
+                    onPlay: { player.play(episode) },
+                    onShowDetail: { path.append(episode) }
+                )
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        downloads.deleteDownload(episode)
+                    } label: {
+                        Label("Удалить", systemImage: "trash")
+                    }
+                }
+            }
+        }
+    }
+
     private var recentSection: some View {
         Section("Свежее у подписок") {
             ForEach(recentFromSubscriptions) { episode in
-                Button {
-                    player.play(episode)
-                } label: {
-                    EpisodeRow(episode: episode)
-                }
-                .buttonStyle(.plain)
+                EpisodeListItem(
+                    episode: episode,
+                    onPlay: { player.play(episode) },
+                    onShowDetail: { path.append(episode) }
+                )
             }
         }
     }
@@ -90,12 +114,12 @@ struct ProfileView: View {
     private var historySection: some View {
         Section("История") {
             ForEach(history.items) { item in
-                Button {
-                    player.play(history.episode(for: item))
-                } label: {
-                    HistoryRow(item: item)
-                }
-                .buttonStyle(.plain)
+                let episode = history.episode(for: item)
+                EpisodeListItem(
+                    episode: episode,
+                    onPlay: { player.play(episode) },
+                    onShowDetail: { path.append(episode) }
+                )
             }
         }
     }
@@ -105,44 +129,10 @@ struct ProfileView: View {
             ContentUnavailableView(
                 "Здесь будет твоя жизнь в подкастах",
                 systemImage: "person.crop.circle",
-                description: Text("Подписки и история прослушиваний появятся, как только начнёшь слушать.")
+                description: Text("Подписки, скачанные выпуски и история прослушиваний появятся, как только начнёшь слушать.")
             )
             .listRowBackground(Color.clear)
             .padding(.vertical, 24)
         }
-    }
-}
-
-private struct HistoryRow: View {
-    let item: HistoryService.Item
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            AsyncImage(url: item.podcastArtworkUrl) { phase in
-                switch phase {
-                case .success(let image):
-                    image.resizable().aspectRatio(contentMode: .fill)
-                default:
-                    Color.secondary.opacity(0.15)
-                }
-            }
-            .frame(width: 56, height: 56)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.podcastName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(item.title)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .lineLimit(2)
-                Text(item.lastPlayedAt, style: .relative)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 4)
     }
 }

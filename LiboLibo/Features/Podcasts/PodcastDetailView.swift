@@ -5,11 +5,13 @@ struct PodcastDetailView: View {
 
     @Environment(PlayerService.self) private var player
     @Environment(SubscriptionsService.self) private var subscriptions
+    @Environment(DownloadService.self) private var downloads
 
     @State private var episodes: [Episode] = []
     @State private var channelDescription: String?
     @State private var isLoading = false
     @State private var loadError: String?
+    @State private var path = NavigationPath()
 
     var body: some View {
         List {
@@ -64,29 +66,32 @@ struct PodcastDetailView: View {
 
             Section("Выпуски") {
                 if isLoading && episodes.isEmpty {
-                    HStack {
-                        Spacer()
-                        ProgressView()
-                        Spacer()
-                    }
-                    .padding(.vertical, 12)
+                    HStack { Spacer(); ProgressView(); Spacer() }
+                        .padding(.vertical, 12)
                 } else if let loadError, episodes.isEmpty {
-                    Text(loadError)
-                        .foregroundStyle(.secondary)
+                    Text(loadError).foregroundStyle(.secondary)
                 } else {
                     ForEach(episodes) { episode in
-                        Button {
-                            player.play(episode)
-                        } label: {
-                            EpisodeRow(episode: episode, showsPreview: true)
+                        EpisodeListItem(
+                            episode: episode,
+                            onPlay: { player.play(episode) },
+                            onShowDetail: { path.append(episode) }
+                        )
+                        .swipeActions(edge: .trailing) {
+                            Button { downloads.toggle(episode) } label: {
+                                Label("Скачать", systemImage: "icloud.and.arrow.down")
+                            }
+                            .tint(.liboRed)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
         }
         .navigationTitle(podcast.name)
         .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(for: Episode.self) { episode in
+            EpisodeDetailView(episode: episode)
+        }
         .task(id: podcast.id) {
             await load()
         }

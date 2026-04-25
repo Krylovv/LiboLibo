@@ -3,9 +3,12 @@ import SwiftUI
 struct FeedView: View {
     @Environment(PodcastsRepository.self) private var repository
     @Environment(PlayerService.self) private var player
+    @Environment(DownloadService.self) private var downloads
+
+    @State private var path = NavigationPath()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             content
                 .navigationTitle("Фид")
                 .refreshable {
@@ -15,6 +18,9 @@ struct FeedView: View {
                     if repository.allEpisodes.isEmpty {
                         await repository.loadAllEpisodes()
                     }
+                }
+                .navigationDestination(for: Episode.self) { episode in
+                    EpisodeDetailView(episode: episode)
                 }
         }
     }
@@ -32,20 +38,51 @@ struct FeedView: View {
             )
         } else {
             List(repository.allEpisodes) { episode in
-                Button {
+                EpisodeListItem(episode: episode) {
                     player.play(episode)
-                } label: {
-                    EpisodeRow(episode: episode)
+                } onShowDetail: {
+                    path.append(episode)
                 }
-                .buttonStyle(.plain)
+                .swipeActions(edge: .trailing) {
+                    Button { downloads.toggle(episode) } label: {
+                        switch downloads.status(for: episode) {
+                        case .downloaded:    Label("Удалить", systemImage: "trash")
+                        case .downloading:   Label("…", systemImage: "icloud")
+                        case .notDownloaded: Label("Скачать", systemImage: "icloud.and.arrow.down")
+                        }
+                    }
+                    .tint(.liboRed)
+                }
             }
             .listStyle(.plain)
         }
     }
 }
 
-#Preview {
-    FeedView()
-        .environment(PodcastsRepository())
-        .environment(PlayerService())
+/// Элемент списка: тап по основной зоне — играет; тап по info-кнопке — открывает экран
+/// выпуска. Apple Podcasts использует противоположный паттерн (row = детали, отдельная
+/// кнопка ▶ = играть), но Илья выбрал «play — главная функция, детали — допфункция».
+struct EpisodeListItem: View {
+    let episode: Episode
+    let onPlay: () -> Void
+    let onShowDetail: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Button(action: onPlay) {
+                EpisodeRow(episode: episode)
+            }
+            .buttonStyle(.plain)
+
+            Button(action: onShowDetail) {
+                Image(systemName: "info.circle")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Описание выпуска")
+        }
+    }
 }

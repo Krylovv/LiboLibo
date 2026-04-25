@@ -1,0 +1,94 @@
+import SwiftUI
+
+/// Экран отдельного выпуска: обложка, метаданные, кнопки «Слушать» / «Скачать»
+/// и полное описание из RSS.
+struct EpisodeDetailView: View {
+    let episode: Episode
+
+    @Environment(PlayerService.self) private var player
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                header
+                actions
+                description
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .navigationTitle("Выпуск")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: 16) {
+            AsyncImage(url: episode.podcastArtworkUrl) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().aspectRatio(contentMode: .fill)
+                default:
+                    Color.secondary.opacity(0.15)
+                }
+            }
+            .frame(width: 110, height: 110)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(episode.podcastName)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text(episode.title)
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .lineLimit(4)
+                HStack(spacing: 6) {
+                    Text(episode.pubDate, style: .date)
+                    if let dur = episode.duration {
+                        Text("·")
+                        Text(formatDuration(dur))
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var actions: some View {
+        HStack(spacing: 12) {
+            Button {
+                player.play(episode)
+            } label: {
+                Label("Слушать", systemImage: "play.fill")
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.liboRed)
+
+            DownloadButton(episode: episode, style: .button)
+                .buttonStyle(.bordered)
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private var description: some View {
+        if !episode.summary.isEmpty {
+            Text(episode.summary)
+                .font(.body)
+                .foregroundStyle(.primary)
+                .padding(.top, 4)
+                .textSelection(.enabled)
+        }
+    }
+}
+
+private func formatDuration(_ seconds: TimeInterval) -> String {
+    let total = Int(seconds.rounded())
+    let h = total / 3600
+    let m = (total % 3600) / 60
+    if h > 0 { return "\(h) ч \(m) мин" }
+    return "\(m) мин"
+}
